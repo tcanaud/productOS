@@ -177,40 +177,54 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
 
       {/* Main editor area */}
       <div className="flex min-h-0 flex-1">
-        <Group direction="horizontal" autoSaveId={`diagram-${diagramId}`}>
-          <Panel defaultSize={hasSidePanel ? 40 : 50} minSize={20}>
-            <div className="h-full">
-              <MonacoMermaidEditor value={content} onChange={setContent} />
-            </div>
-          </Panel>
-          <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-          <Panel defaultSize={hasSidePanel ? 30 : 40} minSize={20}>
-            <MermaidPreview content={debouncedContent} />
-          </Panel>
-          <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-          {hasSidePanel ? (
-            <>
-              <Panel defaultSize={20} minSize={15} maxSize={40}>
-                {sidePanel === 'generate' && (
-                  <AIGeneratePanel
-                    onGenerated={handleAIGenerated}
-                    hasExistingContent={content.trim().length > 0}
-                  />
-                )}
-                {sidePanel === 'review' && (
-                  <ReviewPanel diagramId={diagramId} diagramContent={debouncedContent} />
-                )}
-                {sidePanel === 'specs' && (
-                  <SpecPanel diagramId={diagramId} diagramContent={debouncedContent} />
-                )}
-              </Panel>
-              <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-            </>
-          ) : null}
-          <Panel defaultSize={10} minSize={8} maxSize={30}>
-            <VersionHistory versions={versions} onRestore={handleRestore} />
-          </Panel>
-        </Group>
+        {hasSidePanel ? (
+          <Group orientation="horizontal" key="with-side">
+            <Panel defaultSize="35%" minSize="20%">
+              <div className="h-full">
+                <MonacoMermaidEditor value={content} onChange={setContent} />
+              </div>
+            </Panel>
+            <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            <Panel defaultSize="30%" minSize="15%">
+              <MermaidPreview content={debouncedContent} />
+            </Panel>
+            <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            <Panel defaultSize="25%" minSize="15%" maxSize="40%">
+              {sidePanel === 'generate' && (
+                <AIGeneratePanel
+                  onGenerated={handleAIGenerated}
+                  hasExistingContent={content.trim().length > 0}
+                />
+              )}
+              {sidePanel === 'review' && (
+                <ReviewPanel diagramId={diagramId} diagramContent={debouncedContent} />
+              )}
+              {sidePanel === 'specs' && (
+                <SpecPanel diagramId={diagramId} diagramContent={debouncedContent} />
+              )}
+            </Panel>
+            <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            <Panel defaultSize="10%" minSize="8%" maxSize="30%">
+              <VersionHistory versions={versions} onRestore={handleRestore} />
+            </Panel>
+          </Group>
+        ) : (
+          <Group orientation="horizontal" key="no-side">
+            <Panel defaultSize="45%" minSize="20%">
+              <div className="h-full">
+                <MonacoMermaidEditor value={content} onChange={setContent} />
+              </div>
+            </Panel>
+            <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            <Panel defaultSize="40%" minSize="20%">
+              <MermaidPreview content={debouncedContent} />
+            </Panel>
+            <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            <Panel defaultSize="15%" minSize="10%" maxSize="30%">
+              <VersionHistory versions={versions} onRestore={handleRestore} />
+            </Panel>
+          </Group>
+        )}
       </div>
     </div>
   );
