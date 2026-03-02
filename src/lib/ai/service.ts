@@ -7,6 +7,9 @@ import type { MultiProfileReview } from './schemas/review-output';
 import type { GeneratedSpec } from './schemas/spec-output';
 import { GeneratedSpecSchema } from './schemas/spec-output';
 import type { ChatResponse } from './schemas/chat-response';
+import { PersonaResponseSchema } from './schemas/chat-response';
+import { selectPersonas } from './persona-selector';
+import { PERSONAS } from './prompts/personas';
 import type { DiagramType } from '@/lib/json2mermaid/types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import { anthropic } from './client';
@@ -232,16 +235,99 @@ export const aiService = {
   },
 
   /**
-   * Multi-persona chat over a diagram context.
+   * Multi-persona chat over workspace context.
    * Implemented in Story 5.1.
    */
   chat: async (
-    _messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-    _personas: string[],
-    _context: string,
-    _options: ChatOptions
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    personaIds: string[],
+    context: string,
+    options: ChatOptions
   ): Promise<AIResult<ChatResponse>> => {
-    throw new Error('chat: not yet implemented (Story 5.1)');
+    const config = ENDPOINT_CONFIG['chat'];
+    const model = options.model ?? config.model;
+
+    // Determine which personas will respond
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const selectedIds =
+      personaIds.length >= 2 ? personaIds.slice(0, 3) : selectPersonas(lastUserMessage, messages);
+
+    // Summarize history if > 10 messages (keep last 10, prepend summary line)
+    let history = messages;
+    if (messages.length > 10) {
+      const omittedCount = messages.length - 10;
+      const summaryLine = {
+        role: 'user' as const,
+        content: `[Earlier in conversation: ${omittedCount} message(s) summarized]`,
+      };
+      history = [summaryLine, ...messages.slice(-10)];
+    }
+
+    // Build conversation history string for user prompt
+    const historyText = history
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+
+    const turn = Math.floor(messages.filter((m) => m.role === 'user').length);
+
+    const start = Date.now();
+
+    // Parallel LLM calls for each selected persona
+    const personaResults = await Promise.all(
+      selectedIds.map(async (personaId) => {
+        const persona = PERSONAS[personaId as keyof typeof PERSONAS];
+        if (!persona) return null;
+
+        const system = `${persona.systemPrompt}\n\n${context}`;
+        const userPrompt = historyText
+          ? `${historyText}\n\nUser: ${lastUserMessage}`
+          : `User: ${lastUserMessage}`;
+
+        const response = await withRetry(
+          () =>
+            anthropic.messages.create({
+              model,
+              max_tokens: config.maxTokens,
+              temperature: config.temperature,
+              system,
+              messages: [{ role: 'user', content: userPrompt }],
+            }),
+          { maxRetries: 1 }
+        );
+
+        const parsed = parseStructuredResponse(response, PersonaResponseSchema);
+
+        return {
+          parsed,
+          usage: {
+            inputTokens: response.usage.input_tokens,
+            outputTokens: response.usage.output_tokens,
+            totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+          },
+        };
+      })
+    );
+
+    const latencyMs = Date.now() - start;
+
+    const responses = personaResults
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .map((r) => r.parsed);
+
+    const totalUsage: TokenUsage = personaResults
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .reduce(
+        (acc, r) => ({
+          inputTokens: acc.inputTokens + r.usage.inputTokens,
+          outputTokens: acc.outputTokens + r.usage.outputTokens,
+          totalTokens: acc.totalTokens + r.usage.totalTokens,
+        }),
+        { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+      );
+
+    const data: ChatResponse = { responses, turn };
+
+    return { data, usage: totalUsage, latencyMs };
   },
 };
 

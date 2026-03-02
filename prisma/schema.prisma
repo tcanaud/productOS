@@ -10,28 +10,30 @@ datasource db {
 }
 
 model User {
-  id         String            @id @default(cuid())
-  email      String            @unique
-  name       String?
-  password   String
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  owned      Workspace[]       @relation("WorkspaceOwner")
-  workspaces WorkspaceMember[]
-  reviews    DiagramReview[]
-  specs      Spec[]
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String?
+  password     String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owned        Workspace[]       @relation("WorkspaceOwner")
+  workspaces   WorkspaceMember[]
+  reviews      DiagramReview[]
+  specs        Spec[]
+  chatSessions ChatSession[]
 }
 
 model Workspace {
-  id          String            @id @default(cuid())
-  name        String
-  description String?
-  ownerId     String
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  members     WorkspaceMember[]
-  diagrams    Diagram[]
+  id           String            @id @default(cuid())
+  name         String
+  description  String?
+  ownerId      String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owner        User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members      WorkspaceMember[]
+  diagrams     Diagram[]
+  chatSessions ChatSession[]
 }
 
 model Diagram {
@@ -89,6 +91,26 @@ model Spec {
   updatedAt   DateTime  @updatedAt
   diagram     Diagram   @relation(fields: [diagramId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id])
+}
+
+model ChatSession {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id])
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  role      String
+  personaId String?
+  content   String
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
 
 model AIUsageLog {
