@@ -6,6 +6,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useAutosave } from '@/hooks/useAutosave';
 import { VersionHistory, type DiagramVersion } from './VersionHistory';
 import { MermaidPreview } from './MermaidPreview';
+import { AIGeneratePanel } from './AIGeneratePanel';
 
 // Monaco is SSR-incompatible — load dynamically
 const MonacoMermaidEditor = dynamic(
@@ -26,6 +27,7 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
   const [debouncedContent, setDebouncedContent] = useState(initialContent);
   const [title, setTitle] = useState(initialTitle);
   const [versions, setVersions] = useState<DiagramVersion[]>([]);
+  const [showAIPanel, setShowAIPanel] = useState(false);
 
   // Debounce preview rendering (< 500ms)
   useEffect(() => {
@@ -94,6 +96,11 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
     }
   };
 
+  const handleAIGenerated = (mermaidSyntax: string) => {
+    setContent(mermaidSyntax);
+    setShowAIPanel(false);
+  };
+
   const saveIndicator: Record<typeof status, string> = {
     saved: 'Saved ✓',
     saving: 'Saving…',
@@ -112,6 +119,17 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
           placeholder="Diagram title"
           aria-label="Diagram title"
         />
+        <button
+          onClick={() => setShowAIPanel((v) => !v)}
+          className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+            showAIPanel
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          }`}
+          aria-pressed={showAIPanel}
+        >
+          Generate with AI
+        </button>
         <span
           className={`text-xs ${
             status === 'saved'
@@ -128,16 +146,27 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
       {/* Main editor area */}
       <div className="flex min-h-0 flex-1">
         <PanelGroup direction="horizontal" autoSaveId={`diagram-${diagramId}`}>
-          <Panel defaultSize={50} minSize={20}>
+          <Panel defaultSize={showAIPanel ? 40 : 50} minSize={20}>
             <div className="h-full">
               <MonacoMermaidEditor value={content} onChange={setContent} />
             </div>
           </Panel>
           <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-          <Panel defaultSize={40} minSize={20}>
+          <Panel defaultSize={showAIPanel ? 30 : 40} minSize={20}>
             <MermaidPreview content={debouncedContent} />
           </Panel>
           <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+          {showAIPanel ? (
+            <>
+              <Panel defaultSize={20} minSize={15} maxSize={35}>
+                <AIGeneratePanel
+                  onGenerated={handleAIGenerated}
+                  hasExistingContent={content.trim().length > 0}
+                />
+              </Panel>
+              <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+            </>
+          ) : null}
           <Panel defaultSize={10} minSize={8} maxSize={30}>
             <VersionHistory versions={versions} onRestore={handleRestore} />
           </Panel>
