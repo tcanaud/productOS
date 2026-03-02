@@ -29,6 +29,28 @@ model Workspace {
   updatedAt   DateTime          @updatedAt
   owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   members     WorkspaceMember[]
+  diagrams    Diagram[]
+}
+
+model Diagram {
+  id          String           @id @default(cuid())
+  workspaceId String
+  title       String
+  content     String           @default("")
+  diagramType String           @default("flowchart")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions    DiagramVersion[]
+}
+
+model DiagramVersion {
+  id        String   @id @default(cuid())
+  diagramId String
+  content   String
+  authorId  String
+  createdAt DateTime @default(now())
+  diagram   Diagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
 }
 
 model WorkspaceMember {
