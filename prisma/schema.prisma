@@ -41,3 +41,16 @@ model WorkspaceMember {
 
   @@unique([workspaceId, userId])
 }
+
+model AIUsageLog {
+  id           String   @id @default(cuid())
+  userId       String
+  workspaceId  String?
+  endpoint     String
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  latencyMs    Int
+  success      Boolean
+  createdAt    DateTime @default(now())
+}
