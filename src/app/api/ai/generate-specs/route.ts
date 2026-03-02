@@ -35,11 +35,12 @@ async function handler(req: NextRequest, userId: string): Promise<NextResponse> 
   });
 
   // Persist the spec to DB (best-effort — don't fail the request if DB is unavailable)
+  let specId: string | undefined;
   try {
     const { prisma } = await import('@/lib/prisma');
-    await (
+    const created = await (
       prisma as unknown as {
-        spec: { create: (args: unknown) => Promise<unknown> };
+        spec: { create: (args: unknown) => Promise<{ id: string }> };
       }
     ).spec.create({
       data: {
@@ -48,6 +49,7 @@ async function handler(req: NextRequest, userId: string): Promise<NextResponse> 
         userId,
       },
     });
+    specId = created.id;
   } catch {
     // DB persistence is best-effort; spec result still returned
   }
@@ -55,6 +57,7 @@ async function handler(req: NextRequest, userId: string): Promise<NextResponse> 
   return NextResponse.json({
     ...result.spec,
     latencyMs: result.latencyMs,
+    ...(specId ? { specId } : {}),
   });
 }
 

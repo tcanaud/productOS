@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { PRDView } from './PRDView';
 import { StoriesList } from './StoriesList';
 import { EdgeCasesTable } from './EdgeCasesTable';
+import { ExportButton } from './ExportButton';
 import type { GeneratedSpec } from '@/lib/ai/schemas/spec-output';
 
 type SpecTab = 'prd' | 'stories' | 'edge-cases';
@@ -14,7 +15,7 @@ type Props = {
   diagramContent: string;
 };
 
-type SpecResponse = GeneratedSpec & { latencyMs?: number };
+type SpecResponse = GeneratedSpec & { latencyMs?: number; specId?: string };
 
 export function SpecPanel({ diagramId, diagramContent }: Props) {
   const [activeTab, setActiveTab] = useState<SpecTab>('prd');
@@ -64,12 +65,12 @@ export function SpecPanel({ diagramId, diagramContent }: Props) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Generate button */}
-      <div className="px-3 pt-3 pb-2">
+      {/* Toolbar: Generate button + Export button (when spec loaded) */}
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <button
           onClick={handleGenerate}
           disabled={isLoading}
-          className="flex w-full items-center justify-center gap-2 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex flex-1 items-center justify-center gap-2 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isLoading ? (
             <>
@@ -83,6 +84,7 @@ export function SpecPanel({ diagramId, diagramContent }: Props) {
             'Generate Specs'
           )}
         </button>
+        {spec?.specId && <ExportButton specId={spec.specId} />}
       </div>
 
       {/* Tabs */}
