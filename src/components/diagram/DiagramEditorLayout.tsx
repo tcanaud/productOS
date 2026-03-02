@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group, Separator } from 'react-resizable-panels';
 import { useAutosave } from '@/hooks/useAutosave';
 import { VersionHistory, type DiagramVersion } from './VersionHistory';
 import { MermaidPreview } from './MermaidPreview';
@@ -177,17 +177,17 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
 
       {/* Main editor area */}
       <div className="flex min-h-0 flex-1">
-        <PanelGroup direction="horizontal" autoSaveId={`diagram-${diagramId}`}>
+        <Group direction="horizontal" autoSaveId={`diagram-${diagramId}`}>
           <Panel defaultSize={hasSidePanel ? 40 : 50} minSize={20}>
             <div className="h-full">
               <MonacoMermaidEditor value={content} onChange={setContent} />
             </div>
           </Panel>
-          <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+          <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
           <Panel defaultSize={hasSidePanel ? 30 : 40} minSize={20}>
             <MermaidPreview content={debouncedContent} />
           </Panel>
-          <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+          <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
           {hasSidePanel ? (
             <>
               <Panel defaultSize={20} minSize={15} maxSize={40}>
@@ -204,13 +204,13 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
                   <SpecPanel diagramId={diagramId} diagramContent={debouncedContent} />
                 )}
               </Panel>
-              <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
+              <Separator className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
             </>
           ) : null}
           <Panel defaultSize={10} minSize={8} maxSize={30}>
             <VersionHistory versions={versions} onRestore={handleRestore} />
           </Panel>
-        </PanelGroup>
+        </Group>
       </div>
     </div>
   );

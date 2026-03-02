@@ -2,10 +2,13 @@
 set -e
 
 echo "Waiting for postgres..."
-until pg_isready -h postgres -p 5432 -U productos; do
+until nc -z postgres 5432 2>/dev/null; do
   sleep 1
 done
 echo "Postgres is ready."
+
+echo "Generating Prisma client..."
+npx prisma generate
 
 echo "Running database migrations..."
 npx prisma migrate deploy

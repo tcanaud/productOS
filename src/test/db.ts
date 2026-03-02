@@ -11,17 +11,17 @@
  *   afterAll(async () => { await teardownTestDB(); });
  */
 import { execSync } from 'child_process';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@/generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
 let prisma: PrismaClient | null = null;
 
 function getTestPrisma(): PrismaClient {
   if (!prisma) {
-    prisma = new PrismaClient({
-      datasources: {
-        db: { url: process.env.DATABASE_URL },
-      },
+    const adapter = new PrismaPg({
+      connectionString: process.env.DATABASE_URL!,
     });
+    prisma = new PrismaClient({ adapter });
   }
   return prisma;
 }
