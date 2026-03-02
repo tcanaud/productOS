@@ -18,6 +18,7 @@ model User {
   updatedAt  DateTime          @updatedAt
   owned      Workspace[]       @relation("WorkspaceOwner")
   workspaces WorkspaceMember[]
+  reviews    DiagramReview[]
 }
 
 model Workspace {
@@ -42,6 +43,7 @@ model Diagram {
   updatedAt   DateTime         @updatedAt
   workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   versions    DiagramVersion[]
+  reviews     DiagramReview[]
 }
 
 model DiagramVersion {
@@ -62,6 +64,18 @@ model WorkspaceMember {
   user        User      @relation(fields: [userId], references: [id])
 
   @@unique([workspaceId, userId])
+}
+
+model DiagramReview {
+  id          String   @id @default(cuid())
+  diagramId   String
+  versionId   String?
+  profile     String
+  contentJson Json
+  userId      String
+  createdAt   DateTime @default(now())
+  diagram     Diagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
 }
 
 model AIUsageLog {

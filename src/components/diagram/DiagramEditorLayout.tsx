@@ -7,6 +7,7 @@ import { useAutosave } from '@/hooks/useAutosave';
 import { VersionHistory, type DiagramVersion } from './VersionHistory';
 import { MermaidPreview } from './MermaidPreview';
 import { AIGeneratePanel } from './AIGeneratePanel';
+import { ReviewPanel } from './ReviewPanel';
 
 // Monaco is SSR-incompatible — load dynamically
 const MonacoMermaidEditor = dynamic(
@@ -22,12 +23,14 @@ type Props = {
 
 const DEBOUNCE_MS = 500;
 
+type SidePanel = 'generate' | 'review' | null;
+
 export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }: Props) {
   const [content, setContent] = useState(initialContent);
   const [debouncedContent, setDebouncedContent] = useState(initialContent);
   const [title, setTitle] = useState(initialTitle);
   const [versions, setVersions] = useState<DiagramVersion[]>([]);
-  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [sidePanel, setSidePanel] = useState<SidePanel>(null);
 
   // Debounce preview rendering (< 500ms)
   useEffect(() => {
@@ -98,7 +101,11 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
 
   const handleAIGenerated = (mermaidSyntax: string) => {
     setContent(mermaidSyntax);
-    setShowAIPanel(false);
+    setSidePanel(null);
+  };
+
+  const togglePanel = (panel: SidePanel) => {
+    setSidePanel((prev) => (prev === panel ? null : panel));
   };
 
   const saveIndicator: Record<typeof status, string> = {
@@ -107,6 +114,8 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
     unsaved: 'Unsaved changes',
     error: 'Save failed',
   };
+
+  const hasSidePanel = sidePanel !== null;
 
   return (
     <div className="flex h-full flex-col">
@@ -120,15 +129,26 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
           aria-label="Diagram title"
         />
         <button
-          onClick={() => setShowAIPanel((v) => !v)}
+          onClick={() => togglePanel('generate')}
           className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-            showAIPanel
+            sidePanel === 'generate'
               ? 'bg-primary text-primary-foreground'
               : 'bg-muted text-muted-foreground hover:bg-muted/80'
           }`}
-          aria-pressed={showAIPanel}
+          aria-pressed={sidePanel === 'generate'}
         >
           Generate with AI
+        </button>
+        <button
+          onClick={() => togglePanel('review')}
+          className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+            sidePanel === 'review'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          }`}
+          aria-pressed={sidePanel === 'review'}
+        >
+          Review with AI
         </button>
         <span
           className={`text-xs ${
@@ -146,23 +166,28 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
       {/* Main editor area */}
       <div className="flex min-h-0 flex-1">
         <PanelGroup direction="horizontal" autoSaveId={`diagram-${diagramId}`}>
-          <Panel defaultSize={showAIPanel ? 40 : 50} minSize={20}>
+          <Panel defaultSize={hasSidePanel ? 40 : 50} minSize={20}>
             <div className="h-full">
               <MonacoMermaidEditor value={content} onChange={setContent} />
             </div>
           </Panel>
           <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-          <Panel defaultSize={showAIPanel ? 30 : 40} minSize={20}>
+          <Panel defaultSize={hasSidePanel ? 30 : 40} minSize={20}>
             <MermaidPreview content={debouncedContent} />
           </Panel>
           <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
-          {showAIPanel ? (
+          {hasSidePanel ? (
             <>
-              <Panel defaultSize={20} minSize={15} maxSize={35}>
-                <AIGeneratePanel
-                  onGenerated={handleAIGenerated}
-                  hasExistingContent={content.trim().length > 0}
-                />
+              <Panel defaultSize={20} minSize={15} maxSize={40}>
+                {sidePanel === 'generate' && (
+                  <AIGeneratePanel
+                    onGenerated={handleAIGenerated}
+                    hasExistingContent={content.trim().length > 0}
+                  />
+                )}
+                {sidePanel === 'review' && (
+                  <ReviewPanel diagramId={diagramId} diagramContent={debouncedContent} />
+                )}
               </Panel>
               <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />
             </>

@@ -2,6 +2,8 @@ import type { AIEndpoint, AIModel } from './config';
 import { ENDPOINT_CONFIG } from './config';
 import type { TokenUsage } from './token-tracker';
 import type { ReviewOutput } from './schemas/review-output';
+import { MultiProfileReviewSchema } from './schemas/review-output';
+import type { MultiProfileReview } from './schemas/review-output';
 import type { SpecOutput } from './schemas/spec-output';
 import type { ChatResponse } from './schemas/chat-response';
 import type { DiagramType } from '@/lib/json2mermaid/types';
@@ -11,6 +13,11 @@ import { parseStructuredResponse } from './structured-output';
 import { withRetry } from './error-handler';
 import { GenerateFlowResponseSchema } from './schemas/generate-flow-response';
 import { buildFlowGenerationPrompt } from './prompts/flow-generation';
+import {
+  buildReviewSystemPrompt,
+  buildReviewUserPrompt,
+  extractMermaidNodes,
+} from './prompts/review-profiles';
 
 export interface AIResult<T> {
   data: T;
@@ -37,6 +44,12 @@ export interface ReviewDiagramOptions {
   userId: string;
   workspaceId?: string;
   model?: AIModel;
+}
+
+export interface ReviewDiagramResult {
+  review: MultiProfileReview;
+  usage: TokenUsage;
+  latencyMs: number;
 }
 
 export interface GenerateSpecsOptions {
@@ -124,11 +137,47 @@ export const aiService = {
    * Implemented in Story 3.1.
    */
   reviewDiagram: async (
-    _diagram: string,
-    _profile: string,
-    _options: ReviewDiagramOptions
-  ): Promise<AIResult<ReviewOutput>> => {
-    throw new Error('reviewDiagram: not yet implemented (Story 3.1)');
+    diagram: string,
+    profile: string,
+    options: ReviewDiagramOptions
+  ): Promise<ReviewDiagramResult> => {
+    const validatedProfile = (['optimist', 'moderate', 'critic'] as const).includes(
+      profile as 'optimist' | 'moderate' | 'critic'
+    )
+      ? (profile as 'optimist' | 'moderate' | 'critic')
+      : 'moderate';
+
+    const config = ENDPOINT_CONFIG['review'];
+    const model = options.model ?? config.model;
+    const nodes = extractMermaidNodes(diagram);
+    const system = buildReviewSystemPrompt(validatedProfile);
+    const user = buildReviewUserPrompt(diagram, nodes, validatedProfile);
+
+    const start = Date.now();
+
+    const response = await withRetry(
+      () =>
+        anthropic.messages.create({
+          model,
+          max_tokens: config.maxTokens,
+          temperature: config.temperature,
+          system,
+          messages: [{ role: 'user', content: user }],
+        }),
+      { maxRetries: 1 }
+    );
+
+    const latencyMs = Date.now() - start;
+
+    const usage: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+    };
+
+    const review = parseStructuredResponse(response, MultiProfileReviewSchema);
+
+    return { review, usage, latencyMs };
   },
 
   /**
