@@ -1,10 +1,29 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
+# Install system dependencies for Claude CLI and native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude CLI globally
+RUN npm install -g @anthropic-ai/claude-code
+
 # Install dependencies first (cached layer)
+# Remove claudegraph file: dep before install (volume not available at build time)
 COPY package.json package-lock.json ./
+RUN node -e " \
+  const pkg = require('./package.json'); \
+  delete pkg.dependencies['claudegraph']; \
+  require('fs').writeFileSync('./package.json', JSON.stringify(pkg, null, 2)); \
+  const lock = require('./package-lock.json'); \
+  if (lock.packages) delete lock.packages['node_modules/claudegraph']; \
+  if (lock.dependencies) delete lock.dependencies['claudegraph']; \
+  require('fs').writeFileSync('./package-lock.json', JSON.stringify(lock, null, 2));"
 RUN npm ci
+# Restore original package.json for the app source
+COPY package.json ./
 
 # Copy source code (will be overridden by volume mount in dev)
 COPY . .

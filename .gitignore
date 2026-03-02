@@ -13,6 +13,9 @@ dist/
 .env.local
 .env.*.local
 
+# Claude CLI credentials — NEVER commit
+.claude-credentials.json
+
 # Prisma generated client
 src/generated/
 .prisma/
@@ -35,3 +38,6 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Logs
+*.jsonl

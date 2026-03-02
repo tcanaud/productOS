@@ -11,12 +11,10 @@ import { PersonaResponseSchema } from './schemas/chat-response';
 import { selectPersonas } from './persona-selector';
 import { PERSONAS } from './prompts/personas';
 import type { DiagramType } from '@/lib/json2mermaid/types';
-import { json2mermaid } from '@/lib/json2mermaid';
 import { anthropic } from './client';
 import { parseStructuredResponse } from './structured-output';
 import { withRetry } from './error-handler';
-import { GenerateFlowResponseSchema } from './schemas/generate-flow-response';
-import { buildFlowGenerationPrompt } from './prompts/flow-generation';
+import { runGenerateFlowGraph } from './graphs';
 import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
@@ -96,50 +94,18 @@ export const aiService = {
     options: GenerateFlowOptions
   ): Promise<GenerateFlowResult> => {
     const diagramType = options.diagramType ?? 'auto';
-    const config = ENDPOINT_CONFIG['flow-generation'];
-    const model = options.model ?? config.model;
-    const { system, user } = buildFlowGenerationPrompt(description, diagramType);
 
     const start = Date.now();
 
-    const response = await withRetry(
-      () =>
-        anthropic.messages.create({
-          model,
-          max_tokens: config.maxTokens,
-          temperature: config.temperature,
-          system,
-          messages: [{ role: 'user', content: user }],
-        }),
-      { maxRetries: 1 }
-    );
+    const result = await runGenerateFlowGraph(description, diagramType);
 
     const latencyMs = Date.now() - start;
 
-    const usage: TokenUsage = {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-    };
-
-    const graph = parseStructuredResponse(response, GenerateFlowResponseSchema);
-
-    // Cast to JsonGraph-compatible type for json2mermaid
-    const jsonGraph = {
-      diagramType: graph.diagramType,
-      direction: graph.direction,
-      title: graph.title,
-      nodes: graph.nodes,
-      edges: graph.edges,
-    };
-
-    const mermaidSyntax = json2mermaid(jsonGraph as import('@/lib/json2mermaid/types').JsonGraph);
-
     return {
-      graph,
-      mermaidSyntax,
-      explanation: graph.explanation,
-      usage,
+      graph: result.graph as GenerateFlowResult['graph'],
+      mermaidSyntax: result.mermaidSyntax,
+      explanation: result.explanation,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       latencyMs,
     };
   },

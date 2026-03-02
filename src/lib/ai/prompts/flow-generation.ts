@@ -6,18 +6,18 @@ const JSON_SCHEMA_EXAMPLE = `{
   "direction": "TD",
   "title": "User Signup Flow",
   "nodes": [
-    {"id": "A", "label": "Start", "shape": "circle"},
-    {"id": "B", "label": "Enter Email", "shape": "rect"},
-    {"id": "C", "label": "Valid Email?", "shape": "rhombus"},
-    {"id": "D", "label": "Send Verification", "shape": "rect"},
-    {"id": "E", "label": "End", "shape": "circle"}
+    {"id": "begin", "label": "Start", "shape": "circle"},
+    {"id": "enter_email", "label": "Enter Email", "shape": "rect"},
+    {"id": "check_email", "label": "Valid Email?", "shape": "rhombus"},
+    {"id": "send_verify", "label": "Send Verification", "shape": "rect"},
+    {"id": "done", "label": "End", "shape": "circle"}
   ],
   "edges": [
-    {"from": "A", "to": "B"},
-    {"from": "B", "to": "C"},
-    {"from": "C", "to": "D", "label": "Yes"},
-    {"from": "C", "to": "B", "label": "No"},
-    {"from": "D", "to": "E"}
+    {"from": "begin", "to": "enter_email"},
+    {"from": "enter_email", "to": "check_email"},
+    {"from": "check_email", "to": "send_verify", "label": "Yes"},
+    {"from": "check_email", "to": "enter_email", "label": "No"},
+    {"from": "send_verify", "to": "done"}
   ],
   "explanation": "This flow represents a user signup with email validation. I assumed the user retries if the email is invalid. The verification step is the key action before completion."
 }`;
@@ -48,11 +48,12 @@ The JSON must follow this exact schema:
 
 Rules:
 - Node ids must be unique, alphanumeric (no spaces, use underscores)
+- NEVER use "end", "start", "graph", "subgraph", "style", "class", "click", "default" as node ids — these are Mermaid reserved keywords. Use alternatives like "finish", "done", "begin", "init" instead
 - All edges must reference existing node ids
 - The "explanation" field MUST be present: describe assumptions made, why you chose this structure, and any design decisions
 - Keep node labels concise (< 40 chars)
-- For flowchart: include a start node (shape: "circle") and at least one end node
-- For stateDiagram: use "start" as initial state id, "end" as terminal state id
+- For flowchart: include a start node (shape: "circle") and at least one end node (shape: "circle")
+- For stateDiagram: use "init" as initial state id, "done" as terminal state id
 - For sequenceDiagram: nodes are participants, edges are messages with labels
 
 Example output:

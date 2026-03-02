@@ -1,6 +1,16 @@
 #!/bin/sh
 set -e
 
+# Copy claudegraph from mounted volume into node_modules (Turbopack doesn't follow symlinks)
+if [ -d "/claudegraph" ] && [ -f "/claudegraph/package.json" ]; then
+  echo "Copying claudegraph into node_modules..."
+  rm -rf /app/node_modules/claudegraph
+  cp -r /claudegraph /app/node_modules/claudegraph
+  echo "claudegraph installed in /app/node_modules/claudegraph"
+else
+  echo "WARNING: /claudegraph volume not mounted — claudegraph features disabled."
+fi
+
 echo "Waiting for postgres..."
 until nc -z postgres 5432 2>/dev/null; do
   sleep 1
