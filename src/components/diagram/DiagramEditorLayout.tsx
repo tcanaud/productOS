@@ -8,6 +8,7 @@ import { VersionHistory, type DiagramVersion } from './VersionHistory';
 import { MermaidPreview } from './MermaidPreview';
 import { AIGeneratePanel } from './AIGeneratePanel';
 import { ReviewPanel } from './ReviewPanel';
+import { SpecPanel } from '@/components/specs/SpecPanel';
 
 // Monaco is SSR-incompatible — load dynamically
 const MonacoMermaidEditor = dynamic(
@@ -23,7 +24,7 @@ type Props = {
 
 const DEBOUNCE_MS = 500;
 
-type SidePanel = 'generate' | 'review' | null;
+type SidePanel = 'generate' | 'review' | 'specs' | null;
 
 export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }: Props) {
   const [content, setContent] = useState(initialContent);
@@ -150,6 +151,17 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
         >
           Review with AI
         </button>
+        <button
+          onClick={() => togglePanel('specs')}
+          className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+            sidePanel === 'specs'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-muted text-muted-foreground hover:bg-muted/80'
+          }`}
+          aria-pressed={sidePanel === 'specs'}
+        >
+          Generate Specs
+        </button>
         <span
           className={`text-xs ${
             status === 'saved'
@@ -187,6 +199,9 @@ export function DiagramEditorLayout({ diagramId, initialContent, initialTitle }:
                 )}
                 {sidePanel === 'review' && (
                   <ReviewPanel diagramId={diagramId} diagramContent={debouncedContent} />
+                )}
+                {sidePanel === 'specs' && (
+                  <SpecPanel diagramId={diagramId} diagramContent={debouncedContent} />
                 )}
               </Panel>
               <PanelResizeHandle className="w-1.5 cursor-col-resize bg-border hover:bg-primary/30 transition-colors" />

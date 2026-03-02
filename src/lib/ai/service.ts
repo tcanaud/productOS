@@ -4,7 +4,8 @@ import type { TokenUsage } from './token-tracker';
 import type { ReviewOutput } from './schemas/review-output';
 import { MultiProfileReviewSchema } from './schemas/review-output';
 import type { MultiProfileReview } from './schemas/review-output';
-import type { SpecOutput } from './schemas/spec-output';
+import type { GeneratedSpec } from './schemas/spec-output';
+import { GeneratedSpecSchema } from './schemas/spec-output';
 import type { ChatResponse } from './schemas/chat-response';
 import type { DiagramType } from '@/lib/json2mermaid/types';
 import { json2mermaid } from '@/lib/json2mermaid';
@@ -18,6 +19,7 @@ import {
   buildReviewUserPrompt,
   extractMermaidNodes,
 } from './prompts/review-profiles';
+import { buildSpecSystemPrompt, buildSpecUserPrompt } from './prompts/spec-generation';
 
 export interface AIResult<T> {
   data: T;
@@ -56,6 +58,13 @@ export interface GenerateSpecsOptions {
   userId: string;
   workspaceId?: string;
   model?: AIModel;
+  reviewContext?: string;
+}
+
+export interface GenerateSpecsResult {
+  spec: GeneratedSpec;
+  usage: TokenUsage;
+  latencyMs: number;
 }
 
 export interface ChatOptions {
@@ -185,11 +194,41 @@ export const aiService = {
    * Implemented in Story 4.1.
    */
   generateSpecs: async (
-    _diagram: string,
+    diagram: string,
     _reviews: ReviewOutput[],
-    _options: GenerateSpecsOptions
-  ): Promise<AIResult<SpecOutput>> => {
-    throw new Error('generateSpecs: not yet implemented (Story 4.1)');
+    options: GenerateSpecsOptions
+  ): Promise<GenerateSpecsResult> => {
+    const config = ENDPOINT_CONFIG['spec-generation'];
+    const model = options.model ?? config.model;
+    const nodes = extractMermaidNodes(diagram);
+    const system = buildSpecSystemPrompt();
+    const user = buildSpecUserPrompt(diagram, nodes, options.reviewContext);
+
+    const start = Date.now();
+
+    const response = await withRetry(
+      () =>
+        anthropic.messages.create({
+          model,
+          max_tokens: config.maxTokens,
+          temperature: config.temperature,
+          system,
+          messages: [{ role: 'user', content: user }],
+        }),
+      { maxRetries: 1 }
+    );
+
+    const latencyMs = Date.now() - start;
+
+    const usage: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+    };
+
+    const spec = parseStructuredResponse(response, GeneratedSpecSchema);
+
+    return { spec, usage, latencyMs };
   },
 
   /**
