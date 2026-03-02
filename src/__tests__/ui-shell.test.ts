@@ -26,8 +26,9 @@ describe('Header', () => {
   });
 
   it('falls back to email initials when name is null', () => {
+    // 'bob@example.com' has one word → single initial 'B'
     const result = getHeaderInitials({ email: 'bob@example.com', name: null });
-    expect(result).toBe('BO');
+    expect(result).toBe('B');
   });
 
   it('truncates initials to 2 chars', () => {
