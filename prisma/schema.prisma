@@ -1,0 +1,128 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String?
+  password     String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owned        Workspace[]       @relation("WorkspaceOwner")
+  workspaces   WorkspaceMember[]
+  reviews      DiagramReview[]
+  specs        Spec[]
+  chatSessions ChatSession[]
+}
+
+model Workspace {
+  id           String            @id @default(cuid())
+  name         String
+  description  String?
+  ownerId      String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  owner        User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members      WorkspaceMember[]
+  diagrams     Diagram[]
+  chatSessions ChatSession[]
+}
+
+model Diagram {
+  id          String           @id @default(cuid())
+  workspaceId String
+  title       String
+  content     String           @default("")
+  diagramType String           @default("flowchart")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions    DiagramVersion[]
+  reviews     DiagramReview[]
+  specs       Spec[]
+}
+
+model DiagramVersion {
+  id        String   @id @default(cuid())
+  diagramId String
+  content   String
+  authorId  String
+  createdAt DateTime @default(now())
+  diagram   Diagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String    @default("owner")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@unique([workspaceId, userId])
+}
+
+model DiagramReview {
+  id          String   @id @default(cuid())
+  diagramId   String
+  versionId   String?
+  profile     String
+  contentJson Json
+  userId      String
+  createdAt   DateTime @default(now())
+  diagram     Diagram  @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model Spec {
+  id          String    @id @default(cuid())
+  diagramId   String
+  contentJson Json
+  userId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  diagram     Diagram   @relation(fields: [diagramId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model ChatSession {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id])
+  messages    ChatMessage[]
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  role      String
+  personaId String?
+  content   String
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model AIUsageLog {
+  id           String   @id @default(cuid())
+  userId       String
+  workspaceId  String?
+  endpoint     String
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  latencyMs    Int
+  success      Boolean
+  createdAt    DateTime @default(now())
+}
