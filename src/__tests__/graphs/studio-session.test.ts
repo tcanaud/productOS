@@ -125,6 +125,7 @@ describe('computeContextScore', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('applyDiagramPatch', () => {
+  // Edges have optional id field for removeEdges (Story 6.5 format)
   const baseGraph: JsonGraph = {
     diagramType: 'flowchart',
     direction: 'TD',
@@ -193,11 +194,19 @@ describe('applyDiagramPatch', () => {
     expect(result.edges).toHaveLength(2);
   });
 
-  it('removes edges', () => {
-    const patch: DiagramPatch = {
-      removeEdges: [{ from: 'A', to: 'B' }],
+  it('removes edges by id (Story 6.5 format)', () => {
+    // Build a graph with named edge ids for removal
+    const graphWithEdgeIds: JsonGraph = {
+      ...baseGraph,
+      edges: [
+        { ...baseGraph.edges[0], id: 'e-A-B' } as (typeof baseGraph.edges)[number],
+        { ...baseGraph.edges[1], id: 'e-B-C' } as (typeof baseGraph.edges)[number],
+      ],
     };
-    const result = applyDiagramPatch(baseGraph, patch);
+    const patch: DiagramPatch = {
+      removeEdges: ['e-A-B'],
+    };
+    const result = applyDiagramPatch(graphWithEdgeIds, patch);
     expect(result.edges).toHaveLength(1);
     expect(result.edges.find((e) => e.from === 'A' && e.to === 'B')).toBeUndefined();
   });
@@ -306,8 +315,8 @@ describe('Integration: state transitions', () => {
         { id: 'confirm', label: 'Confirmation' },
       ],
       edges: [
-        { from: 'cart', to: 'checkout' },
-        { from: 'checkout', to: 'confirm' },
+        { id: 'e1', from: 'cart', to: 'checkout' },
+        { id: 'e2', from: 'checkout', to: 'confirm' },
       ],
     };
 
@@ -317,7 +326,7 @@ describe('Integration: state transitions', () => {
         { from: 'checkout', to: 'payment' },
         { from: 'payment', to: 'confirm' },
       ],
-      removeEdges: [{ from: 'checkout', to: 'confirm' }],
+      removeEdges: ['e2'],
     };
 
     const refined = applyDiagramPatch(initialGraph, patch);
@@ -326,7 +335,7 @@ describe('Integration: state transitions', () => {
     expect(refined.nodes.find((n) => n.id === 'payment')).toBeDefined();
     expect(refined.edges.find((e) => e.from === 'checkout' && e.to === 'payment')).toBeDefined();
     expect(refined.edges.find((e) => e.from === 'payment' && e.to === 'confirm')).toBeDefined();
-    // Direct checkout → confirm edge removed
+    // Direct checkout → confirm edge removed (was e2)
     expect(refined.edges.find((e) => e.from === 'checkout' && e.to === 'confirm')).toBeUndefined();
   });
 

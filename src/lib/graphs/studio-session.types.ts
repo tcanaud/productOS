@@ -26,6 +26,8 @@ export interface StudioSessionState {
   followUpQuestion?: string;
   /** Latest diagram patch from refine node. */
   lastPatch?: DiagramPatch;
+  /** Full history of patches applied in this session (for undo/debug). */
+  patchHistory: DiagramPatch[];
   /** Persisted diagram ID, set by persist node. */
   persistedDiagramId?: string;
   /** Error message if something went wrong. */
@@ -47,13 +49,25 @@ export interface StudioSessionState {
 /**
  * Incremental diagram update produced by the `refine` LLMNode.
  * Applied on top of the current JsonGraph instead of a full regeneration.
+ *
+ * Patch application order: removeNodes → removeEdges → modifyNodes → addNodes → addEdges
  */
 export interface DiagramPatch {
   addNodes?: { id: string; label: string; type?: string }[];
   removeNodes?: string[];
-  addEdges?: { from: string; to: string; label?: string }[];
-  removeEdges?: { from: string; to: string }[];
+  addEdges?: { id?: string; from: string; to: string; label?: string }[];
+  removeEdges?: string[];
   modifyNodes?: { id: string; label?: string; type?: string }[];
+}
+
+/**
+ * Animation event emitted when a patch is applied to the diagram.
+ * Used by DiagramPreviewPanel to animate added/removed/modified elements.
+ */
+export interface PatchAnimationEvent {
+  type: 'add' | 'remove' | 'modify';
+  nodeIds: string[];
+  edgeIds: string[];
 }
 
 /**
@@ -67,6 +81,13 @@ export type StudioInteractResponse =
       checkpoint: unknown;
       personas?: PersonaMessage[];
     }
-  | { type: 'diagram'; mermaid: string; runId: string; checkpoint: unknown; patch?: DiagramPatch }
+  | {
+      type: 'diagram';
+      mermaid: string;
+      runId: string;
+      checkpoint: unknown;
+      patch?: DiagramPatch;
+      patchAnimation?: PatchAnimationEvent;
+    }
   | { type: 'complete'; diagramId: string }
   | { type: 'error'; message: string };

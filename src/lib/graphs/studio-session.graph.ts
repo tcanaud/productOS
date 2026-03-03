@@ -22,8 +22,10 @@ import { json2mermaid } from '@/lib/json2mermaid';
 import { ALL_PERSONA_IDS, PERSONAS } from '@/lib/ai/prompts/personas';
 import { buildOnboardingPrompt, determineOnboardingPhase } from '@/lib/ai/prompts/onboarding';
 import { buildPartyModePrompt } from '@/lib/ai/prompts/party-mode';
+import { buildRefinePrompt } from '@/lib/ai/prompts/refine-flow';
 import { selectPersonas } from '@/lib/personas/registry';
 import { parsePartyModeResponse } from '@/lib/personas/parser';
+import { applyPatch } from './patch-applier';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -142,10 +144,13 @@ export function applyDiagramPatch(base: JsonGraph, patch: DiagramPatch): JsonGra
     }
   }
 
-  if (patch.removeEdges) {
-    for (const re of patch.removeEdges) {
-      edges = edges.filter((e) => !(e.from === re.from && e.to === re.to));
-    }
+  if (patch.removeEdges && patch.removeEdges.length > 0) {
+    // removeEdges is string[] (edge ids) — filter by id field on edges
+    const removeEdgeSet = new Set(patch.removeEdges);
+    edges = edges.filter((e) => {
+      const edgeId = (e as { id?: string }).id;
+      return edgeId === undefined || !removeEdgeSet.has(edgeId);
+    });
   }
 
   return { ...base, nodes, edges };
@@ -195,12 +200,17 @@ const DiagramPatchSchema = z.object({
     .optional(),
   removeNodes: z.array(z.string()).optional(),
   addEdges: z
-    .array(z.object({ from: z.string(), to: z.string(), label: z.string().optional() }))
+    .array(
+      z.object({
+        id: z.string().optional(),
+        from: z.string(),
+        to: z.string(),
+        label: z.string().optional(),
+      })
+    )
     .optional(),
-  removeEdges: z.array(z.object({ from: z.string(), to: z.string() })).optional(),
-  modifyNodes: z
-    .array(z.object({ id: z.string(), label: z.string().optional(), type: z.string().optional() }))
-    .optional(),
+  removeEdges: z.array(z.string()).optional(),
+  modifyNodes: z.array(z.object({ id: z.string() }).passthrough()).optional(),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,31 +310,20 @@ Use clear, concise node labels. Node IDs must be alphanumeric (no spaces).`;
 }
 
 function buildRefineDiagramPrompt(state: StudioSessionState): string {
-  const lastUserMessage =
-    [...state.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
-  const currentDiagram = state.currentDiagram
-    ? JSON.stringify(state.currentDiagram, null, 2)
-    : 'No current diagram';
+  const messages = state.messages;
+  const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const currentGraph = state.currentDiagram;
 
-  return `The user wants to refine the current diagram.
+  if (!currentGraph) {
+    return `No diagram exists yet. Return an empty patch: {}`;
+  }
 
-Current diagram:
-${currentDiagram}
+  // Use last 6 messages as conversation history for context
+  const history = messages.slice(-6);
+  const { system, user } = buildRefinePrompt(currentGraph, lastUserMessage, history);
 
-User's refinement request: "${lastUserMessage}"
-
-Produce a JSON patch to update the diagram.
-You MUST respond with ONLY a valid JSON object (no markdown, no code fences):
-{
-  "addNodes": [{ "id": "...", "label": "..." }],
-  "removeNodes": ["nodeId1", "nodeId2"],
-  "addEdges": [{ "from": "...", "to": "...", "label": "..." }],
-  "removeEdges": [{ "from": "...", "to": "..." }],
-  "modifyNodes": [{ "id": "...", "label": "..." }]
-}
-
-Only include the keys that need changes. Omit keys that don't need updating.
-Node IDs must be alphanumeric (no spaces).`;
+  // LLMNode takes a single prompt string; combine system + user sections
+  return `${system}\n\n---\n\n${user}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -644,7 +643,8 @@ export function createStudioSessionGraph() {
   );
 
   // ── Node 9: apply-patch ──────────────────────────────────────────────────
-  // Applies refine patch to currentDiagram
+  // Applies refine patch to currentDiagram using the pure applyPatch function.
+  // Stores lastPatch and appends to patchHistory for undo/debug support.
   graph.addNode(
     new FnNode({
       id: 'apply-patch',
@@ -657,10 +657,50 @@ export function createStudioSessionGraph() {
           return { kind: 'continue' as const, statePatch: {} };
         }
 
-        const updatedDiagram = applyDiagramPatch(state.currentDiagram, state.refine);
+        const patch = state.refine;
+        const updatedDiagram = applyPatch(state.currentDiagram, patch);
+        const newPatchHistory = [...(state.patchHistory ?? []), patch];
+
         return {
           kind: 'continue' as const,
-          statePatch: { currentDiagram: updatedDiagram, lastPatch: state.refine },
+          statePatch: {
+            currentDiagram: updatedDiagram,
+            lastPatch: patch,
+            patchHistory: newPatchHistory,
+          },
+        };
+      },
+    })
+  );
+
+  // ── Node 9b: build-patch-confirmation ────────────────────────────────────
+  // Builds a human-readable summary of the patch that was applied.
+  // Stored as the mergedResponse for the diagram presentation node to include.
+  graph.addNode(
+    new FnNode({
+      id: 'build-patch-confirmation',
+      fn: (ctx) => {
+        const state = ctx.state as StudioSessionState;
+        const patch = state.lastPatch;
+        if (!patch) {
+          return { kind: 'continue' as const, statePatch: {} };
+        }
+
+        const parts: string[] = [];
+        if (patch.addNodes?.length) parts.push(`Added ${patch.addNodes.length} node(s)`);
+        if (patch.removeNodes?.length) parts.push(`Removed ${patch.removeNodes.length} node(s)`);
+        if (patch.addEdges?.length) parts.push(`Added ${patch.addEdges.length} edge(s)`);
+        if (patch.removeEdges?.length) parts.push(`Removed ${patch.removeEdges.length} edge(s)`);
+        if (patch.modifyNodes?.length) parts.push(`Updated ${patch.modifyNodes.length} node(s)`);
+
+        const summary =
+          parts.length > 0
+            ? `I've updated the diagram: ${parts.join(', ')}.`
+            : 'No changes were made to the diagram.';
+
+        return {
+          kind: 'continue' as const,
+          statePatch: { mergedResponse: summary },
         };
       },
     })
@@ -862,8 +902,11 @@ export function createStudioSessionGraph() {
   // refine → apply-patch
   graph.from('refine').to('apply-patch').done();
 
-  // apply-patch → present-diagram-to-user (show updated diagram)
-  graph.from('apply-patch').to('present-diagram-to-user').done();
+  // apply-patch → build-patch-confirmation (generate human-readable summary)
+  graph.from('apply-patch').to('build-patch-confirmation').done();
+
+  // build-patch-confirmation → present-diagram-to-user (show updated diagram)
+  graph.from('build-patch-confirmation').to('present-diagram-to-user').done();
 
   return graph;
 }

@@ -58,6 +58,8 @@ export async function startStudioSession(
     // Story 6.4: party-mode fields
     partyModeEnabled: true,
     personaMessages: [],
+    // Story 6.5: patch tracking fields
+    patchHistory: [],
   };
 
   return runner.run(initialState);

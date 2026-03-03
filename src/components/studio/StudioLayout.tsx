@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import { ConversationPanel } from './ConversationPanel';
 import { DiagramPreviewPanel } from './DiagramPreviewPanel';
+import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 
 export type PersonaBubble = {
   personaId: string;
@@ -32,10 +33,13 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [diagramContent, setDiagramContent] = useState<string | undefined>(undefined);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [patchAnimation, setPatchAnimation] = useState<PatchAnimationEvent | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Checkpoint from the graph runner — maintained across turns
   const checkpointRef = useRef<unknown>(null);
+  // Timer ref for clearing patchAnimation after 800ms (covers add 600ms + remove 400ms)
+  const patchAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function handleSend(text: string) {
     if (!text.trim() || isLoading) return;
@@ -76,7 +80,12 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
             checkpoint: unknown;
             personas?: PersonaBubble[];
           }
-        | { type: 'diagram'; mermaid: string; checkpoint: unknown }
+        | {
+            type: 'diagram';
+            mermaid: string;
+            checkpoint: unknown;
+            patchAnimation?: PatchAnimationEvent;
+          }
         | { type: 'complete'; diagramId: string }
         | { type: 'error'; message: string };
 
@@ -105,6 +114,18 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
         setTimeout(() => {
           setDiagramContent(data.mermaid);
           setIsStreaming(false);
+
+          // Story 6.5: apply patch animation if present, clear after 800ms
+          if (data.patchAnimation) {
+            setPatchAnimation(data.patchAnimation);
+
+            if (patchAnimationTimerRef.current) {
+              clearTimeout(patchAnimationTimerRef.current);
+            }
+            patchAnimationTimerRef.current = setTimeout(() => {
+              setPatchAnimation(undefined);
+            }, 800);
+          }
         }, 600);
       } else if (data.type === 'complete') {
         setIsLoading(false);
@@ -145,7 +166,11 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
         />
       </div>
       <div className="flex-1 overflow-hidden">
-        <DiagramPreviewPanel diagramContent={diagramContent} isStreaming={isStreaming} />
+        <DiagramPreviewPanel
+          diagramContent={diagramContent}
+          isStreaming={isStreaming}
+          patchAnimation={patchAnimation}
+        />
       </div>
     </div>
   );
