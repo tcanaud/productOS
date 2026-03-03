@@ -55,6 +55,9 @@ export async function startStudioSession(
     wordCount: 0,
     onboardingPhase: 'clarify',
     clarificationCount: 0,
+    // Story 6.4: party-mode fields
+    partyModeEnabled: true,
+    personaMessages: [],
   };
 
   return runner.run(initialState);

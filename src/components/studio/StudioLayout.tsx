@@ -5,11 +5,21 @@ import { toast } from 'sonner';
 import { ConversationPanel } from './ConversationPanel';
 import { DiagramPreviewPanel } from './DiagramPreviewPanel';
 
+export type PersonaBubble = {
+  personaId: string;
+  displayName: string;
+  icon: string;
+  color: string;
+  content: string;
+};
+
 export type Message = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  /** Party-mode: when present, render as staggered PersonaMessageBubble list instead of plain bubble. */
+  personas?: PersonaBubble[];
 };
 
 interface StudioLayoutProps {
@@ -60,7 +70,12 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
       }
 
       const data = (await res.json()) as
-        | { type: 'question'; content: string; checkpoint: unknown }
+        | {
+            type: 'question';
+            content: string;
+            checkpoint: unknown;
+            personas?: PersonaBubble[];
+          }
         | { type: 'diagram'; mermaid: string; checkpoint: unknown }
         | { type: 'complete'; diagramId: string }
         | { type: 'error'; message: string };
@@ -74,6 +89,8 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
           role: 'assistant',
           content: data.content,
           timestamp: new Date(),
+          // Party-mode: include parsed persona bubbles if present
+          personas: data.personas,
         };
         setMessages((prev) => [...prev, aiMessage]);
         setIsLoading(false);

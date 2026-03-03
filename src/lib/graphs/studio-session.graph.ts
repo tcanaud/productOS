@@ -21,6 +21,9 @@ import type { JsonGraph } from '@/lib/json2mermaid/types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import { ALL_PERSONA_IDS, PERSONAS } from '@/lib/ai/prompts/personas';
 import { buildOnboardingPrompt, determineOnboardingPhase } from '@/lib/ai/prompts/onboarding';
+import { buildPartyModePrompt } from '@/lib/ai/prompts/party-mode';
+import { selectPersonas } from '@/lib/personas/registry';
+import { parsePartyModeResponse } from '@/lib/personas/parser';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -152,12 +155,20 @@ export function applyDiagramPatch(base: JsonGraph, patch: DiagramPatch): JsonGra
 // Zod schemas for LLMNode outputs
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PersonaRespondSchema = z.object({
-  mergedResponse: z.string(),
-  followUpQuestion: z.string(),
-  personaResponses: z.record(z.string(), z.string()),
-  contextScore: z.number().min(0).max(100),
-});
+// Standard JSON schema for non-party-mode responses
+const PersonaRespondSchema = z.union([
+  // Party-mode: wrapped delimiter response
+  z.object({
+    partyResponse: z.string(),
+  }),
+  // Standard onboarding/generate mode
+  z.object({
+    mergedResponse: z.string(),
+    followUpQuestion: z.string(),
+    personaResponses: z.record(z.string(), z.string()),
+    contextScore: z.number().min(0).max(100),
+  }),
+]);
 
 const GenerateDiagramSchema = z.object({
   diagramType: z.enum(['flowchart', 'stateDiagram', 'sequenceDiagram']),
@@ -197,6 +208,25 @@ const DiagramPatchSchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildMultiPersonaPrompt(state: StudioSessionState): string {
+  // Story 6.4: party-mode wraps the delimiter-based response in JSON for LLMNode compatibility
+  if (state.partyModeEnabled) {
+    const lastUserMessage =
+      [...state.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+    const personas = selectPersonas(lastUserMessage, 3);
+    const { system, user } = buildPartyModePrompt(personas, state.messages);
+    // Instruct the LLM to wrap the party response in a JSON envelope so the
+    // LLMNode (which always expects JSON) can parse it correctly.
+    return `${system}
+
+IMPORTANT — OUTPUT WRAPPING:
+Wrap your entire response in this JSON envelope (no text outside it):
+{"partyResponse": "<your full delimited response here, with \\n for newlines>"}
+
+---
+
+${user}`;
+  }
+
   // Use onboarding-aware prompt when in the onboarding phase (clarify/confirm)
   if (state.onboardingPhase === 'clarify' || state.onboardingPhase === 'confirm') {
     const { system, user } = buildOnboardingPrompt({
@@ -383,6 +413,32 @@ export function createStudioSessionGraph() {
     })
   );
 
+  // ── Node 3b: parse-party-response (Story 6.4) ───────────────────────────
+  // When partyModeEnabled, parse the raw delimited response from multi-persona-respond
+  // into structured PersonaMessage[], stored in state.personaMessages.
+  graph.addNode(
+    new FnNode({
+      id: 'parse-party-response',
+      fn: (ctx) => {
+        const state = ctx.state as StudioSessionState & {
+          'multi-persona-respond'?: { partyResponse?: string };
+        };
+
+        if (!state.partyModeEnabled) {
+          return { kind: 'continue' as const, statePatch: {} };
+        }
+
+        const rawPartyResponse = state['multi-persona-respond']?.partyResponse ?? '';
+        const personaMessages = parsePartyModeResponse(rawPartyResponse);
+
+        return {
+          kind: 'continue' as const,
+          statePatch: { personaMessages },
+        };
+      },
+    })
+  );
+
   // ── Node 4: present-to-user (AskHumanNode = InteractionNode) ────────────
   graph.addNode(
     new AskHumanNode({
@@ -396,6 +452,17 @@ export function createStudioSessionGraph() {
           'multi-persona-respond'?: { mergedResponse?: string; followUpQuestion?: string };
         };
         const llmOutput = state['multi-persona-respond'];
+
+        // Party-mode: build content from parsed persona messages
+        if (state.partyModeEnabled && state.personaMessages.length > 0) {
+          const combined = state.personaMessages.map((pm) => pm.content).join('\n\n');
+          return {
+            key: `studio-question-${state.messages.length}`,
+            kind: 'text' as const,
+            prompt: combined,
+          };
+        }
+
         const content = llmOutput?.followUpQuestion
           ? `${llmOutput.mergedResponse ?? ''}\n\n${llmOutput.followUpQuestion}`
           : (llmOutput?.mergedResponse ?? 'What would you like to design?');
@@ -419,9 +486,15 @@ export function createStudioSessionGraph() {
 
         const newMessages: StudioSessionState['messages'] = [
           ...state.messages,
-          ...(llmOutput?.mergedResponse
-            ? [{ role: 'assistant' as const, content: llmOutput.mergedResponse }]
-            : []),
+          // Party-mode: append one assistant message per persona
+          ...(state.partyModeEnabled && state.personaMessages.length > 0
+            ? state.personaMessages.map((pm) => ({
+                role: 'assistant' as const,
+                content: `[${pm.displayName}]: ${pm.content}`,
+              }))
+            : llmOutput?.mergedResponse
+              ? [{ role: 'assistant' as const, content: llmOutput.mergedResponse }]
+              : []),
           { role: 'user' as const, content: String(answer) },
         ];
 
@@ -693,8 +766,11 @@ export function createStudioSessionGraph() {
   // select-personas → multi-persona-respond
   graph.from('select-personas').to('multi-persona-respond').done();
 
-  // multi-persona-respond → present-to-user
-  graph.from('multi-persona-respond').to('present-to-user').done();
+  // multi-persona-respond → parse-party-response (Story 6.4: always runs; no-op when !partyModeEnabled)
+  graph.from('multi-persona-respond').to('parse-party-response').done();
+
+  // parse-party-response → present-to-user
+  graph.from('parse-party-response').to('present-to-user').done();
 
   // present-to-user → route
   graph.from('present-to-user').to('route').done();

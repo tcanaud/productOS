@@ -103,11 +103,18 @@ export async function POST(
       }
 
       // Default: question pause (present-to-user node)
+      // Story 6.4: include parsed persona messages when party mode is active
+      const personasPayload =
+        finalState.partyModeEnabled && finalState.personaMessages.length > 0
+          ? { personas: finalState.personaMessages }
+          : {};
+
       return NextResponse.json({
         type: 'question',
         content: pendingRequest?.prompt ?? 'What would you like to design?',
         runId: outcome.runId,
         checkpoint: serializedCheckpoint,
+        ...personasPayload,
       });
     }
 

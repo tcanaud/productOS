@@ -1,5 +1,6 @@
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { OnboardingPhase } from '@/lib/ai/prompts/onboarding';
+import type { PersonaMessage } from '@/lib/personas/parser';
 
 /**
  * State threaded through the studio-session claudegraph run.
@@ -36,6 +37,11 @@ export interface StudioSessionState {
   onboardingPhase: OnboardingPhase;
   /** Number of clarification questions asked so far. */
   clarificationCount: number;
+  // ── Story 6.4: Party Mode fields ──────────────────────────────────────────
+  /** Whether BMAD party mode is active (always true for Story 6.4 sessions). */
+  partyModeEnabled: boolean;
+  /** Last parsed persona messages from the party-mode response parser. */
+  personaMessages: PersonaMessage[];
 }
 
 /**
@@ -54,7 +60,13 @@ export interface DiagramPatch {
  * API response envelope for POST /api/studio/[workspaceId]/interact
  */
 export type StudioInteractResponse =
-  | { type: 'question'; content: string; runId: string; checkpoint: unknown }
+  | {
+      type: 'question';
+      content: string;
+      runId: string;
+      checkpoint: unknown;
+      personas?: PersonaMessage[];
+    }
   | { type: 'diagram'; mermaid: string; runId: string; checkpoint: unknown; patch?: DiagramPatch }
   | { type: 'complete'; diagramId: string }
   | { type: 'error'; message: string };
