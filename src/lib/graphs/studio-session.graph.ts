@@ -17,7 +17,7 @@
 import { Graph, FnNode, LLMNode, AskHumanNode } from 'claudegraph';
 import { z } from 'zod';
 import type { StudioSessionState, DiagramPatch } from './studio-session.types';
-import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { JsonGraph, NodeShape, EdgeType } from '@/lib/json2mermaid/types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import { ALL_PERSONA_IDS, PERSONAS } from '@/lib/ai/prompts/personas';
 import { buildOnboardingPrompt, determineOnboardingPhase } from '@/lib/ai/prompts/onboarding';
@@ -32,7 +32,9 @@ import { applyPatch } from './patch-applier';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Classify user intent from raw message text. */
-export function classifyIntent(message: string): 'describe' | 'refine' | 'confirm' | 'discuss' | 'other' {
+export function classifyIntent(
+  message: string
+): 'describe' | 'refine' | 'confirm' | 'discuss' | 'other' {
   const lower = message.toLowerCase().trim();
 
   if (
@@ -61,7 +63,7 @@ export function classifyIntent(message: string): 'describe' | 'refine' | 'confir
     'revenons à la discussion',
     'avis des personas',
     'que pensent',
-    'let\'s discuss',
+    "let's discuss",
     'back to discussion',
   ];
   if (discussKeywords.some((kw) => lower.includes(kw))) {
@@ -136,7 +138,11 @@ export function applyDiagramPatch(base: JsonGraph, patch: DiagramPatch): JsonGra
   if (patch.addNodes) {
     for (const n of patch.addNodes) {
       if (!nodes.find((x) => x.id === n.id)) {
-        nodes.push({ id: n.id, label: n.label });
+        nodes.push({
+          id: n.id,
+          label: n.label,
+          ...(n.type ? { shape: n.type as NodeShape } : {}),
+        });
       }
     }
   }
@@ -151,7 +157,11 @@ export function applyDiagramPatch(base: JsonGraph, patch: DiagramPatch): JsonGra
     for (const mod of patch.modifyNodes) {
       const idx = nodes.findIndex((n) => n.id === mod.id);
       if (idx !== -1) {
-        nodes[idx] = { ...nodes[idx], ...(mod.label ? { label: mod.label } : {}) };
+        nodes[idx] = {
+          ...nodes[idx],
+          ...(mod.label ? { label: mod.label } : {}),
+          ...(mod.type ? { shape: mod.type as NodeShape } : {}),
+        };
       }
     }
   }
@@ -327,7 +337,20 @@ You MUST respond with ONLY a valid JSON object (no markdown, no code fences):
 }
 
 Choose the most appropriate diagram type for the described flow.
-Use clear, concise node labels. Node IDs must be alphanumeric (no spaces).`;
+Use clear, concise node labels. Node IDs must be alphanumeric (no spaces).
+
+Available node shapes — use diverse shapes to make the diagram visually informative:
+- "rect" — standard action/process step (default)
+- "round" — soft actions, comments, notes
+- "rhombus" — decisions, conditions, branching points
+- "stadium" — start/end terminators, key milestones, triggers/events
+- "circle" — simple connectors or junction points
+- "cylinder" — databases, storage, data stores
+- "subroutine" — reusable sub-processes, external calls
+- "hexagon" — preparation, setup, initialization steps
+- "parallelogram" — input/output, data entry, user forms
+- "trapezoid" — manual operations, human tasks
+Avoid using only "rect" — pick the shape that best represents each node's role.`;
 }
 
 function buildRefineDiagramPrompt(state: StudioSessionState): string {
@@ -647,11 +670,13 @@ export function createStudioSessionGraph() {
           nodes: generated.nodes.map((n) => ({
             id: n.id,
             label: n.label,
+            ...(n.shape ? { shape: n.shape as NodeShape } : {}),
           })),
           edges: generated.edges.map((e) => ({
             from: e.from,
             to: e.to,
             ...(e.label ? { label: e.label } : {}),
+            ...(e.type ? { type: e.type as EdgeType } : {}),
           })),
         };
 
@@ -934,7 +959,9 @@ export function createStudioSessionGraph() {
     .to('present-diagram-to-user')
     .when((ctx) => {
       const intent = (ctx.state as StudioSessionState).intent;
-      return intent !== 'refine' && intent !== 'confirm' && intent !== 'discuss' && intent !== 'describe';
+      return (
+        intent !== 'refine' && intent !== 'confirm' && intent !== 'discuss' && intent !== 'describe'
+      );
     })
     .priority(0)
     .done();

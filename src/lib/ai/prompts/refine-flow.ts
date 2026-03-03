@@ -44,6 +44,8 @@ Rules:
 - removeNodes cascades: all edges referencing a removed node id are also removed.
 - modifyNodes performs a shallow merge: only the provided fields are updated.
 - Patch application order: removeNodes → removeEdges → modifyNodes → addNodes → addEdges
+- Available node "type" values: "rect" (action/process), "round" (soft action/note), "rhombus" (decision/condition), "stadium" (start/end/milestone), "circle" (connector), "cylinder" (database/storage), "subroutine" (sub-process/external call), "hexagon" (preparation/setup), "parallelogram" (input/output), "trapezoid" (manual operation)
+- Always set the appropriate "type" on addNodes and modifyNodes to match the node's semantic role
 
 ## Few-shot examples
 
@@ -51,7 +53,7 @@ Instruction: "Add an error flow after payment"
 Patch:
 \`\`\`json
 {
-  "addNodes": [{ "id": "err1", "label": "Error", "type": "diamond" }],
+  "addNodes": [{ "id": "err1", "label": "Payment Failed?", "type": "rhombus" }],
   "addEdges": [{ "id": "e-pay-err1", "from": "payment", "to": "err1", "label": "failure" }]
 }
 \`\`\`

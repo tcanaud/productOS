@@ -6,25 +6,27 @@ const JSON_SCHEMA_EXAMPLE = `{
   "direction": "TD",
   "title": "User Signup Flow",
   "nodes": [
-    {"id": "begin", "label": "Start", "shape": "circle"},
-    {"id": "enter_email", "label": "Enter Email", "shape": "rect"},
+    {"id": "begin", "label": "Start", "shape": "stadium"},
+    {"id": "enter_email", "label": "Enter Email", "shape": "parallelogram"},
     {"id": "check_email", "label": "Valid Email?", "shape": "rhombus"},
     {"id": "send_verify", "label": "Send Verification", "shape": "rect"},
-    {"id": "done", "label": "End", "shape": "circle"}
+    {"id": "store_user", "label": "User DB", "shape": "cylinder"},
+    {"id": "done", "label": "End", "shape": "stadium"}
   ],
   "edges": [
     {"from": "begin", "to": "enter_email"},
     {"from": "enter_email", "to": "check_email"},
     {"from": "check_email", "to": "send_verify", "label": "Yes"},
     {"from": "check_email", "to": "enter_email", "label": "No"},
-    {"from": "send_verify", "to": "done"}
+    {"from": "send_verify", "to": "store_user"},
+    {"from": "store_user", "to": "done"}
   ],
   "explanation": "This flow represents a user signup with email validation. I assumed the user retries if the email is invalid. The verification step is the key action before completion."
 }`;
 
 const DIAGRAM_TYPE_GUIDANCE: Record<DiagramType, string> = {
   flowchart:
-    'Use flowchart for process flows, user journeys, and decision trees. Direction TD (top-down) is standard. Use rhombus shape for decisions, circle for start/end, rect for actions.',
+    'Use flowchart for process flows, user journeys, and decision trees. Direction TD (top-down) is standard. Use varied node shapes: "rhombus" for decisions/conditions, "circle" for start/end, "stadium" for key milestones/triggers, "rect" for standard actions, "round" for soft actions/notes, "subroutine" for reusable sub-processes, "cylinder" for databases/storage, "hexagon" for preparation/setup steps, "parallelogram" for input/output data, "trapezoid" for manual operations.',
   stateDiagram:
     'Use stateDiagram for state machines and lifecycle flows. Use node ids as state names, edges as transitions. Use "start" as the initial state id and "end" as the terminal state id.',
   sequenceDiagram:
@@ -52,7 +54,19 @@ Rules:
 - All edges must reference existing node ids
 - The "explanation" field MUST be present: describe assumptions made, why you chose this structure, and any design decisions
 - Keep node labels concise (< 40 chars)
-- For flowchart: include a start node (shape: "circle") and at least one end node (shape: "circle")
+- For flowchart: include a start node (shape: "stadium") and at least one end node (shape: "stadium")
+- Available shapes and when to use them:
+  "rect" — standard action/process step (default)
+  "round" — soft actions, comments, or notes
+  "rhombus" — decisions, conditions, branching points
+  "stadium" — start/end terminators, key milestones, triggers/events
+  "circle" — simple connectors or junction points
+  "cylinder" — databases, storage, data stores
+  "subroutine" — reusable sub-processes, external calls
+  "hexagon" — preparation, setup, initialization steps
+  "parallelogram" — input/output, data entry, user forms
+  "trapezoid" — manual operations, human tasks
+- Use diverse shapes to make the diagram visually informative — avoid using only "rect"
 - For stateDiagram: use "init" as initial state id, "done" as terminal state id
 - For sequenceDiagram: nodes are participants, edges are messages with labels
 

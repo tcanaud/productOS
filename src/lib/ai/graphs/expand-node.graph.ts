@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 import { Graph, FnNode, LLMNode, GraphRunner } from 'claudegraph';
-import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { JsonGraph, NodeShape } from '@/lib/json2mermaid/types';
 import { patchGraph } from '@/lib/graph/patch-graph';
 
 // ─── Zod schema for LLM output ─────────────────────────────────────────────────
@@ -17,6 +17,7 @@ const GraphFragmentSchema = z.object({
     z.object({
       id: z.string(),
       label: z.string(),
+      shape: z.string().optional(),
     })
   ),
   edges: z.array(
@@ -109,12 +110,13 @@ export function createExpandNodeGraph() {
           'what happens inside this step.',
           '',
           'Return a JSON object with this exact shape:',
-          '{ "nodes": [{ "id": string, "label": string }], "edges": [{ "from": string, "to": string, "label"?: string }] }',
+          '{ "nodes": [{ "id": string, "label": string, "shape"?: string }], "edges": [{ "from": string, "to": string, "label"?: string }] }',
           '',
           'Rules:',
           `- The first node in your list receives all incoming connections of "${state.nodeId}"`,
           `- The last node in your list receives all outgoing connections of "${state.nodeId}"`,
           '- Node ids must be unique strings (use snake_case)',
+          '- Use appropriate shape values: "rect" (action/process), "round" (soft action/note), "rhombus" (decision/condition), "stadium" (start/end/milestone), "circle" (connector), "cylinder" (database/storage), "subroutine" (sub-process), "hexagon" (preparation/setup), "parallelogram" (input/output), "trapezoid" (manual operation)',
           '- Return ONLY the JSON object, no markdown, no commentary',
         ].join('\n');
       },
@@ -140,7 +142,11 @@ export function createExpandNodeGraph() {
 
         const fragmentGraph: JsonGraph = {
           diagramType: state.graph.diagramType,
-          nodes: fragment.nodes,
+          nodes: fragment.nodes.map((n) => ({
+            id: n.id,
+            label: n.label,
+            ...(n.shape ? { shape: n.shape as NodeShape } : {}),
+          })),
           edges: fragment.edges,
         };
 

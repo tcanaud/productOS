@@ -6,7 +6,7 @@
  *
  * Application order: removeNodes → removeEdges → modifyNodes → addNodes → addEdges
  */
-import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { JsonGraph, NodeShape } from '@/lib/json2mermaid/types';
 import type { DiagramPatch } from './studio-session.types';
 
 /**
@@ -50,7 +50,11 @@ export function applyPatch(graph: JsonGraph, patch: DiagramPatch): JsonGraph {
     for (const mod of patch.modifyNodes) {
       const idx = nodes.findIndex((n) => n.id === mod.id);
       if (idx !== -1) {
-        nodes[idx] = { ...nodes[idx], ...(mod.label !== undefined ? { label: mod.label } : {}) };
+        nodes[idx] = {
+          ...nodes[idx],
+          ...(mod.label !== undefined ? { label: mod.label } : {}),
+          ...(mod.type ? { shape: mod.type as NodeShape } : {}),
+        };
       }
     }
   }
@@ -60,7 +64,11 @@ export function applyPatch(graph: JsonGraph, patch: DiagramPatch): JsonGraph {
     const existingIds = new Set(nodes.map((n) => n.id));
     for (const n of patch.addNodes) {
       if (!existingIds.has(n.id)) {
-        nodes.push({ id: n.id, label: n.label });
+        nodes.push({
+          id: n.id,
+          label: n.label,
+          ...(n.type ? { shape: n.type as NodeShape } : {}),
+        });
         existingIds.add(n.id);
       }
     }
