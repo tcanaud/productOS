@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth-utils';
+import { sessionManager } from '@/lib/session/session-manager';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -89,6 +90,9 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
   if (!membership) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+
+  // Story 6.7: Remove session filesystem dir before workspace deletion (idempotent)
+  await sessionManager.deleteSession(id);
 
   // Delete members first (FK constraint), then workspace
   await prisma.workspaceMember.deleteMany({ where: { workspaceId: id } });

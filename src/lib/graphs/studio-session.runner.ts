@@ -99,16 +99,20 @@ function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
  * @param workspaceId - The workspace this session belongs to.
  * @param userMessage - First message from the user.
  * @param sessionId - Optional logical session ID for SSE event routing.
+ * @param sessionDir - Optional absolute path to the BMAD session directory (Story 6.7).
  */
 export async function startStudioSession(
   workspaceId: string,
   userMessage: string,
-  sessionId?: string
+  sessionId?: string,
+  sessionDir?: string
 ): Promise<RunOutcome> {
   const { runner } = createStudioSessionRunner();
 
   const initialState: StudioSessionState = {
     workspaceId,
+    // Story 6.7: sessionDir passed to nodes so Claude CLI CWD can be set
+    ...(sessionDir ? { sessionDir } : {}),
     messages: [{ role: 'user', content: userMessage }],
     personaResponses: {},
     currentDiagram: null,

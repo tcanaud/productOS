@@ -35,6 +35,18 @@ model Workspace {
   members      WorkspaceMember[]
   diagrams     Diagram[]
   chatSessions ChatSession[]
+  session      WorkspaceSession?
+}
+
+model WorkspaceSession {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  activeAgents String[]  @default([])
+  lastActivity DateTime  @default(now()) @updatedAt
+  state        Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Diagram {

@@ -41,3 +41,6 @@ next-env.d.ts
 
 # Logs
 *.jsonl
+
+# BMAD session data (Story 6.7) — per-workspace session directories
+data/sessions/

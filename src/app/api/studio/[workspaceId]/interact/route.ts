@@ -22,6 +22,7 @@ import { json2mermaid } from '@/lib/json2mermaid';
 import { startStudioSession, resumeStudioSession } from '@/lib/graphs/studio-session.runner';
 import type { RunCheckpoint } from '@/lib/graphs/studio-session.runner';
 import type { StudioSessionState, PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
+import { sessionManager } from '@/lib/session/session-manager';
 
 /** Derive a PatchAnimationEvent from the last applied patch for frontend animation. */
 function derivePatchAnimation(state: StudioSessionState): PatchAnimationEvent | undefined {
@@ -80,8 +81,15 @@ export async function POST(
       // Resume existing session (Story 6.6: pass sessionId for SSE routing)
       outcome = await resumeStudioSession(checkpoint, userMessage.trim(), sessionId);
     } else {
-      // Start new session (Story 6.6: pass sessionId for SSE routing)
-      outcome = await startStudioSession(workspaceId, userMessage.trim(), sessionId);
+      // Story 6.7: ensure BMAD session exists and load context for this workspace
+      const sessionCtx = await sessionManager.loadContext(workspaceId);
+      // Start new session (Story 6.6: pass sessionId; Story 6.7: pass sessionDir)
+      outcome = await startStudioSession(
+        workspaceId,
+        userMessage.trim(),
+        sessionId,
+        sessionCtx.sessionDir
+      );
     }
 
     const finalState = outcome.state as StudioSessionState;
@@ -104,6 +112,14 @@ export async function POST(
           content: mermaidContent,
           diagramType: finalState.currentDiagram.diagramType,
         },
+      });
+
+      // Story 6.7: persist artifacts to BMAD session filesystem
+      await sessionManager.persistArtifacts(workspaceId, {
+        diagramJson: JSON.stringify(finalState.currentDiagram),
+        diagramMermaid: mermaidContent,
+        version: diagram.id,
+        state: { lastDiagramId: diagram.id },
       });
 
       return NextResponse.json({ type: 'complete', diagramId: diagram.id });

@@ -7,6 +7,8 @@ import type { PersonaMessage } from '@/lib/personas/parser';
  */
 export interface StudioSessionState {
   workspaceId: string;
+  /** Story 6.7: absolute path to data/sessions/{workspaceId}/ for BMAD context. */
+  sessionDir?: string;
   /** Full conversation history including user messages and AI assistant turns. */
   messages: { role: 'user' | 'assistant'; content: string }[];
   /** Latest per-persona response text from multi-persona-respond node. */
