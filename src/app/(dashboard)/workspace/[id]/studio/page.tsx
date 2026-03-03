@@ -1,9 +1,14 @@
 import { StudioLayout } from '@/components/studio/StudioLayout';
 
-export default function StudioPage() {
+interface StudioPageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default async function StudioPage({ params }: StudioPageProps) {
+  const { id } = await params;
   return (
     <div className="h-full">
-      <StudioLayout />
+      <StudioLayout workspaceId={id} />
     </div>
   );
 }

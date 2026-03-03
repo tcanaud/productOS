@@ -1,4 +1,5 @@
 import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { OnboardingPhase } from '@/lib/ai/prompts/onboarding';
 
 /**
  * State threaded through the studio-session claudegraph run.
@@ -28,6 +29,13 @@ export interface StudioSessionState {
   persistedDiagramId?: string;
   /** Error message if something went wrong. */
   error?: string;
+  // ── Story 6.3: Onboarding fields ──────────────────────────────────────────
+  /** Word count of the first user message (computed once, immutable thereafter). */
+  wordCount: number;
+  /** Current onboarding phase driving adaptive clarification behaviour. */
+  onboardingPhase: OnboardingPhase;
+  /** Number of clarification questions asked so far. */
+  clarificationCount: number;
 }
 
 /**

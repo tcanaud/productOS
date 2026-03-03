@@ -20,6 +20,7 @@ import type { StudioSessionState, DiagramPatch } from './studio-session.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import { ALL_PERSONA_IDS, PERSONAS } from '@/lib/ai/prompts/personas';
+import { buildOnboardingPrompt, determineOnboardingPhase } from '@/lib/ai/prompts/onboarding';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -73,6 +74,11 @@ export function classifyIntent(message: string): 'describe' | 'refine' | 'confir
   }
 
   return 'other';
+}
+
+/** Count words in a string. */
+export function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
 /** Estimate context richness from conversation messages (0–100). */
@@ -191,6 +197,19 @@ const DiagramPatchSchema = z.object({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildMultiPersonaPrompt(state: StudioSessionState): string {
+  // Use onboarding-aware prompt when in the onboarding phase (clarify/confirm)
+  if (state.onboardingPhase === 'clarify' || state.onboardingPhase === 'confirm') {
+    const { system, user } = buildOnboardingPrompt({
+      messages: state.messages,
+      wordCount: state.wordCount,
+      onboardingPhase: state.onboardingPhase,
+      clarificationCount: state.clarificationCount,
+    });
+    // LLMNode takes a single prompt string; combine system + user sections
+    return `${system}\n\n---\n\n${user}`;
+  }
+
+  // Fallback: post-onboarding (generate phase) — richer context available
   const lastUserMessage =
     [...state.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const historyText = state.messages
@@ -283,7 +302,34 @@ Node IDs must be alphanumeric (no spaces).`;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function createStudioSessionGraph() {
-  const graph = new Graph('parse-input');
+  const graph = new Graph('classify-input-length');
+
+  // ── Node 0: classify-input-length ────────────────────────────────────────
+  // Story 6.3: computes wordCount from the first user message and initialises
+  // onboardingPhase + clarificationCount. Runs only once at session start.
+  graph.addNode(
+    new FnNode({
+      id: 'classify-input-length',
+      fn: (ctx) => {
+        const state = ctx.state as StudioSessionState;
+        // wordCount already computed on a previous turn → skip
+        if (state.wordCount > 0) {
+          return { kind: 'continue' as const, statePatch: {} };
+        }
+        const firstUserMessage = state.messages.find((m) => m.role === 'user')?.content ?? '';
+        const wc = countWords(firstUserMessage);
+        const phase = determineOnboardingPhase(wc, state.contextScore, 0);
+        return {
+          kind: 'continue' as const,
+          statePatch: {
+            wordCount: wc,
+            onboardingPhase: phase,
+            clarificationCount: 0,
+          },
+        };
+      },
+    })
+  );
 
   // ── Node 1: parse-input ──────────────────────────────────────────────────
   graph.addNode(
@@ -296,10 +342,16 @@ export function createStudioSessionGraph() {
 
         const intent = classifyIntent(lastUserMessage);
         const contextScore = computeContextScore(state.messages);
+        // Re-evaluate onboarding phase with latest context score
+        const onboardingPhase = determineOnboardingPhase(
+          state.wordCount,
+          contextScore,
+          state.clarificationCount
+        );
 
         return {
           kind: 'continue' as const,
-          statePatch: { intent, contextScore },
+          statePatch: { intent, contextScore, onboardingPhase },
         };
       },
     })
@@ -373,6 +425,15 @@ export function createStudioSessionGraph() {
           { role: 'user' as const, content: String(answer) },
         ];
 
+        // Increment clarificationCount each time we receive an answer
+        const newClarificationCount = state.clarificationCount + 1;
+        const newContextScore = llmOutput?.contextScore ?? state.contextScore;
+        const newPhase = determineOnboardingPhase(
+          state.wordCount,
+          newContextScore,
+          newClarificationCount
+        );
+
         return {
           next: 'route',
           statePatch: {
@@ -380,7 +441,9 @@ export function createStudioSessionGraph() {
             mergedResponse: llmOutput?.mergedResponse,
             followUpQuestion: llmOutput?.followUpQuestion,
             personaResponses: llmOutput?.personaResponses ?? {},
-            contextScore: llmOutput?.contextScore ?? state.contextScore,
+            contextScore: newContextScore,
+            clarificationCount: newClarificationCount,
+            onboardingPhase: newPhase,
           },
         };
       },
@@ -408,15 +471,41 @@ export function createStudioSessionGraph() {
   );
 
   // ── Node 6: enough-context? ──────────────────────────────────────────────
+  // Story 6.3: factors in wordCount — detailed inputs have a lower threshold.
   graph.addNode(
     new FnNode({
       id: 'enough-context',
       fn: (ctx) => {
         const state = ctx.state as StudioSessionState;
-        // Routes to 'generate' if contextScore >= 60, else loops back to parse-input
+        const phase = determineOnboardingPhase(
+          state.wordCount,
+          state.contextScore,
+          state.clarificationCount
+        );
         return {
           kind: 'continue' as const,
-          statePatch: {},
+          statePatch: { onboardingPhase: phase },
+        };
+      },
+    })
+  );
+
+  // ── Node 6b: announce-generation ────────────────────────────────────────
+  // Story 6.3: appends the "I see the flow forming" announcement to the
+  // conversation thread before routing to the generate LLMNode.
+  graph.addNode(
+    new FnNode({
+      id: 'announce-generation',
+      fn: (ctx) => {
+        const state = ctx.state as StudioSessionState;
+        const announcement = 'I see the flow forming — let me generate the diagram for you.';
+        const newMessages: StudioSessionState['messages'] = [
+          ...state.messages,
+          { role: 'assistant' as const, content: announcement },
+        ];
+        return {
+          kind: 'continue' as const,
+          statePatch: { messages: newMessages },
         };
       },
     })
@@ -595,6 +684,9 @@ export function createStudioSessionGraph() {
   // Edges
   // ─────────────────────────────────────────────────────────────────────────
 
+  // classify-input-length → parse-input (always, runs first at session start)
+  graph.from('classify-input-length').to('parse-input').done();
+
   // parse-input → select-personas
   graph.from('parse-input').to('select-personas').done();
 
@@ -630,11 +722,14 @@ export function createStudioSessionGraph() {
     .priority(0)
     .done();
 
-  // enough-context → generate (when contextScore >= 60)
+  // enough-context → announce-generation (Story 6.3: when context is sufficient)
   graph
     .from('enough-context')
-    .to('generate')
-    .when((ctx) => (ctx.state as StudioSessionState).contextScore >= 60)
+    .to('announce-generation')
+    .when((ctx) => {
+      const state = ctx.state as StudioSessionState;
+      return state.onboardingPhase === 'generate' || state.contextScore >= 60;
+    })
     .priority(1)
     .done();
 
@@ -642,9 +737,15 @@ export function createStudioSessionGraph() {
   graph
     .from('enough-context')
     .to('parse-input')
-    .when((ctx) => (ctx.state as StudioSessionState).contextScore < 60)
+    .when((ctx) => {
+      const state = ctx.state as StudioSessionState;
+      return state.onboardingPhase !== 'generate' && state.contextScore < 60;
+    })
     .priority(0)
     .done();
+
+  // announce-generation → generate
+  graph.from('announce-generation').to('generate').done();
 
   // generate → convert-diagram
   graph.from('generate').to('convert-diagram').done();

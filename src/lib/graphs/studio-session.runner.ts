@@ -51,6 +51,10 @@ export async function startStudioSession(
     currentDiagram: null,
     intent: null,
     contextScore: 0,
+    // Story 6.3: onboarding fields — classify-input-length node computes wordCount
+    wordCount: 0,
+    onboardingPhase: 'clarify',
+    clarificationCount: 0,
   };
 
   return runner.run(initialState);
