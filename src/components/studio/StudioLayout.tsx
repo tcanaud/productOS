@@ -16,6 +16,7 @@ import type {
   InteractionPayload,
 } from '@/lib/sse/sse.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
 export type PersonaBubble = {
   personaId: string;
@@ -54,6 +55,9 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
   const checkpointRef = useRef<unknown>(null);
   // Timer ref for clearing patchAnimation after 800ms (covers add 600ms + remove 400ms)
   const patchAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Story 7.3: live review annotations
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const liveReviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -162,6 +166,34 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
       }
     }
   }, [events]);
+
+  // Story 7.3: trigger live review 2s after diagram content changes
+  useEffect(() => {
+    if (!diagramContent || !currentGraphRef.current) return;
+
+    if (liveReviewTimerRef.current) clearTimeout(liveReviewTimerRef.current);
+
+    liveReviewTimerRef.current = setTimeout(async () => {
+      const graph = currentGraphRef.current;
+      if (!graph) return;
+      try {
+        const res = await fetch(`/api/ai/live-review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId, graph }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { annotations: Annotation[] };
+        setAnnotations(data.annotations ?? []);
+      } catch {
+        // Live review is best-effort; silently ignore errors
+      }
+    }, 2000);
+
+    return () => {
+      if (liveReviewTimerRef.current) clearTimeout(liveReviewTimerRef.current);
+    };
+  }, [diagramContent, workspaceId]);
 
   // Handle InteractionWidget response — resume graph with user's answer
   const handleRespond = useCallback(
@@ -385,6 +417,7 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
           isStreaming={isStreaming}
           patchAnimation={patchAnimation}
           graph={currentGraphRef.current ?? undefined}
+          annotations={annotations}
         />
       </div>
     </div>

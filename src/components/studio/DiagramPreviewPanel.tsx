@@ -5,8 +5,10 @@ import { MermaidPreview } from '@/components/diagram/MermaidPreview';
 import type { ClickPosition } from '@/components/diagram/MermaidPreview';
 import { DiagramContextMenu } from '@/components/diagram/DiagramContextMenu';
 import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
+import { ReviewBadgeDetail } from '@/components/diagram/ReviewBadgeDetail';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
 type ContextMenuState =
   | { type: 'node'; nodeId: string; position: ClickPosition }
@@ -19,6 +21,8 @@ export type DiagramPreviewPanelProps = {
   patchAnimation?: PatchAnimationEvent;
   /** Structured graph powering the diagram — forwarded to MermaidPreview for patch animations. */
   graph?: JsonGraph;
+  /** Review annotations from the live-review graph — rendered as SVG badge overlays. */
+  annotations?: Annotation[];
   /** Called when the user selects an action from the context menu. */
   onDiagramAction?: (action: DiagramAction) => void;
 };
@@ -28,11 +32,13 @@ export function DiagramPreviewPanel({
   isStreaming = false,
   patchAnimation,
   graph,
+  annotations,
   onDiagramAction,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
 
   const handleNodeClick = useCallback((nodeId: string, pos: ClickPosition) => {
     setContextMenu({ type: 'node', nodeId, position: pos });
@@ -53,6 +59,12 @@ export function DiagramPreviewPanel({
   );
 
   const closeMenu = useCallback(() => setContextMenu(null), []);
+
+  const handleBadgeClick = useCallback((_nodeId: string, annotation: Annotation) => {
+    setSelectedAnnotation(annotation);
+  }, []);
+
+  const closeDetail = useCallback(() => setSelectedAnnotation(null), []);
 
   // Apply patch animation classes to the diagram container when a patch is applied
   useEffect(() => {
@@ -115,8 +127,10 @@ export function DiagramPreviewPanel({
           <MermaidPreview
             content={diagramContent!}
             graph={graph}
+            annotations={annotations}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
+            onBadgeClick={handleBadgeClick}
           />
         </div>
       )}
@@ -140,6 +154,11 @@ export function DiagramPreviewPanel({
           onAction={handleAction}
           onClose={closeMenu}
         />
+      )}
+
+      {/* Review badge detail panel — rendered when a badge is clicked */}
+      {selectedAnnotation && (
+        <ReviewBadgeDetail annotation={selectedAnnotation} onClose={closeDetail} />
       )}
     </div>
   );

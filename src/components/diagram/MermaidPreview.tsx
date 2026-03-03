@@ -10,7 +10,9 @@ import {
   animateAddedEdges,
   animateInitialRender,
 } from '@/lib/svg/patch-animator';
+import { injectBadges } from '@/lib/svg/badge-renderer';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
 /** Position in viewport coordinates (clientX/clientY). */
 export type ClickPosition = { x: number; y: number };
@@ -35,15 +37,26 @@ type Props = {
   content: string;
   /** Optional structured graph — used to diff against previous render for patch animations. */
   graph?: JsonGraph;
+  /** Review annotations — rendered as SVG badge overlays on nodes. */
+  annotations?: Annotation[];
   /** Called when the user clicks a diagram node. */
   onNodeClick?: (nodeId: string, pos: ClickPosition) => void;
   /** Called when the user clicks a diagram edge. */
   onEdgeClick?: (edgeId: string, pos: ClickPosition, from: string, to: string) => void;
+  /** Called when the user clicks a review badge. */
+  onBadgeClick?: (nodeId: string, annotation: Annotation) => void;
 };
 
 let mermaidInitialized = false;
 
-export function MermaidPreview({ content, graph, onNodeClick, onEdgeClick }: Props) {
+export function MermaidPreview({
+  content,
+  graph,
+  annotations,
+  onNodeClick,
+  onEdgeClick,
+  onBadgeClick,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevGraphRef = useRef<JsonGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +121,19 @@ export function MermaidPreview({ content, graph, onNodeClick, onEdgeClick }: Pro
             // Update snapshot after animations are set up
             prevGraphRef.current = graph;
           }
+
+          // ── Inject review badges ──────────────────────────────────────────
+          if (annotations?.length) {
+            injectBadges(svgEl as unknown as SVGSVGElement, annotations);
+          }
+
+          // ── Wire badge click → onBadgeClick ──────────────────────────────
+          if (onBadgeClick) {
+            svgEl.addEventListener('review-badge-click', ((e: Event) => {
+              const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
+              onBadgeClick(ce.detail.nodeId, ce.detail.annotation);
+            }) as EventListener);
+          }
         }
 
         // ── Attach node handlers ──────────────────────────────────────────────
@@ -156,7 +182,27 @@ export function MermaidPreview({ content, graph, onNodeClick, onEdgeClick }: Pro
     };
 
     void renderMermaid();
-  }, [content, graph, onNodeClick, onEdgeClick]);
+  }, [content, graph, annotations, onNodeClick, onEdgeClick, onBadgeClick]);
+
+  // ── Re-inject badges when annotations change without a full diagram re-render ──
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const svgEl = containerRef.current.querySelector('svg') as SVGSVGElement | null;
+    if (!svgEl) return;
+
+    injectBadges(svgEl, annotations ?? []);
+
+    if (onBadgeClick) {
+      // Re-attach handler: remove old listener by replacing the element's event
+      // (injectBadges already dispatches on svgEl, so listener on svgEl is sufficient)
+      const handler = ((e: Event) => {
+        const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
+        onBadgeClick(ce.detail.nodeId, ce.detail.annotation);
+      }) as EventListener;
+      svgEl.addEventListener('review-badge-click', handler);
+      return () => svgEl.removeEventListener('review-badge-click', handler);
+    }
+  }, [annotations, onBadgeClick]);
 
   return (
     <div className="relative h-full w-full overflow-auto bg-white p-4">
