@@ -4,7 +4,7 @@
  * Drives the studio-session claudegraph one turn at a time.
  *
  * Request body:
- *   { userMessage: string; checkpoint?: RunCheckpoint }
+ *   { userMessage: string; checkpoint?: RunCheckpoint; sessionId?: string }
  *
  * On first call: pass only userMessage (no checkpoint) → starts a new session.
  * On subsequent calls: pass userMessage + checkpoint from previous response.
@@ -57,14 +57,14 @@ export async function POST(
 
   const { workspaceId } = await params;
 
-  let body: { userMessage?: string; checkpoint?: RunCheckpoint };
+  let body: { userMessage?: string; checkpoint?: RunCheckpoint; sessionId?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ type: 'error', message: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { userMessage, checkpoint } = body;
+  const { userMessage, checkpoint, sessionId } = body;
 
   if (!userMessage || typeof userMessage !== 'string' || userMessage.trim().length === 0) {
     return NextResponse.json(
@@ -77,11 +77,11 @@ export async function POST(
     let outcome: Awaited<ReturnType<typeof startStudioSession>>;
 
     if (checkpoint) {
-      // Resume existing session
-      outcome = await resumeStudioSession(checkpoint, userMessage.trim());
+      // Resume existing session (Story 6.6: pass sessionId for SSE routing)
+      outcome = await resumeStudioSession(checkpoint, userMessage.trim(), sessionId);
     } else {
-      // Start new session
-      outcome = await startStudioSession(workspaceId, userMessage.trim());
+      // Start new session (Story 6.6: pass sessionId for SSE routing)
+      outcome = await startStudioSession(workspaceId, userMessage.trim(), sessionId);
     }
 
     const finalState = outcome.state as StudioSessionState;

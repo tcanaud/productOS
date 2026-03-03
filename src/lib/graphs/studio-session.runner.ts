@@ -4,11 +4,15 @@
  * Wraps GraphRunner for studio sessions.
  * Provides start / resume helpers and exposes the RunOutcome
  * so the API route can serialize the checkpoint for subsequent turns.
+ *
+ * Story 6.6: emits SSE events via sessionEventBus after each graph turn.
  */
 import { GraphRunner, InMemoryRunStore } from 'claudegraph';
 import type { RunCheckpoint, RunOutcome } from 'claudegraph';
 import { createStudioSessionGraph } from './studio-session.graph';
 import type { StudioSessionState } from './studio-session.types';
+import { sessionEventBus } from '@/lib/sse/session-event-bus';
+import { json2mermaid } from '@/lib/json2mermaid';
 
 export type { RunCheckpoint, RunOutcome };
 
@@ -33,14 +37,73 @@ export function createStudioSessionRunner() {
 }
 
 /**
+ * Emit appropriate SSE events based on the graph run outcome.
+ * Called after every start() / resume() call that has a sessionId.
+ */
+function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
+  const state = outcome.state as StudioSessionState;
+
+  if (outcome.status === 'ended') {
+    // Graph reached END node — diagram confirmed, session complete
+    const summary = state.currentDiagram
+      ? `Diagram "${state.currentDiagram.title || 'Untitled'}" has been saved.`
+      : 'Session completed.';
+    sessionEventBus.emit(sessionId, 'session-end', { summary });
+    return;
+  }
+
+  if (outcome.status === 'paused') {
+    const pausedNode = outcome.pausedAtNode;
+    const pendingRequest = outcome.request;
+
+    if (pausedNode === 'present-diagram-to-user') {
+      if (state.lastPatch) {
+        // Incremental patch update
+        sessionEventBus.emit(sessionId, 'diagram-update', { patch: state.lastPatch });
+      } else if (state.currentDiagram) {
+        // Full diagram generation
+        const mermaidSyntax = json2mermaid(state.currentDiagram);
+        sessionEventBus.emit(sessionId, 'diagram-full', {
+          jsonGraph: state.currentDiagram,
+          mermaidSyntax,
+        });
+      }
+      return;
+    }
+
+    // Default: present-to-user node — persona messages or interaction prompt
+    if (state.partyModeEnabled && state.personaMessages.length > 0) {
+      // Emit one event per persona
+      for (const pm of state.personaMessages) {
+        sessionEventBus.emit(sessionId, 'persona-message', {
+          persona: pm.personaId,
+          displayName: pm.displayName,
+          icon: pm.icon ?? '',
+          message: pm.content,
+        });
+      }
+    } else {
+      // Emit as an interaction prompt
+      const question = pendingRequest?.prompt ?? 'What would you like to design?';
+      sessionEventBus.emit(sessionId, 'interaction', {
+        question,
+        inputType: 'text',
+      });
+    }
+  }
+}
+
+/**
  * Start a brand-new studio session.
  *
  * @param workspaceId - The workspace this session belongs to.
  * @param userMessage - First message from the user.
+ * @param sessionId - Optional logical session ID for SSE event routing.
  */
 export async function startStudioSession(
   workspaceId: string,
-  userMessage: string
+  userMessage: string,
+  sessionId?: string
 ): Promise<RunOutcome> {
   const { runner } = createStudioSessionRunner();
 
@@ -62,7 +125,14 @@ export async function startStudioSession(
     patchHistory: [],
   };
 
-  return runner.run(initialState);
+  const outcome = await runner.run(initialState);
+
+  // Story 6.6: emit SSE events if a sessionId was provided
+  if (sessionId) {
+    emitSSEEvents(sessionId, outcome);
+  }
+
+  return outcome;
 }
 
 /**
@@ -70,10 +140,12 @@ export async function startStudioSession(
  *
  * @param checkpoint - The RunCheckpoint returned from the previous turn.
  * @param userMessage - The user's response to the AskHumanNode prompt.
+ * @param sessionId - Optional logical session ID for SSE event routing.
  */
 export async function resumeStudioSession(
   checkpoint: RunCheckpoint,
-  userMessage: string
+  userMessage: string,
+  sessionId?: string
 ): Promise<RunOutcome> {
   const { runner } = createStudioSessionRunner();
 
@@ -82,5 +154,12 @@ export async function resumeStudioSession(
     throw new Error('Checkpoint has no pending human key — cannot resume');
   }
 
-  return runner.resume(checkpoint, { key: pendingKey, value: userMessage });
+  const outcome = await runner.resume(checkpoint, { key: pendingKey, value: userMessage });
+
+  // Story 6.6: emit SSE events if a sessionId was provided
+  if (sessionId) {
+    emitSSEEvents(sessionId, outcome);
+  }
+
+  return outcome;
 }
