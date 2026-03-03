@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth-utils';
 
-type RouteParams = { params: Promise<{ workspaceId: string; connectionId: string }> };
+type RouteParams = { params: Promise<{ id: string; connectionId: string }> };
 
 /**
  * DELETE /api/workspaces/[workspaceId]/canvas/connections/[connectionId]
@@ -14,7 +14,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
   if (authResult instanceof NextResponse) return authResult;
   const user = authResult;
 
-  const { workspaceId, connectionId } = await params;
+  const { id: workspaceId, connectionId } = await params;
 
   // Verify membership
   const membership = await prisma.workspaceMember.findFirst({

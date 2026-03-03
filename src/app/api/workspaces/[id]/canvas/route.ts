@@ -4,7 +4,7 @@ import { requireAuth } from '@/lib/auth-utils';
 import { migrateV1ToCanvas } from '@/lib/canvas/migrate-v1';
 import type { CanvasArtifact, CanvasConnection } from '@/lib/canvas/types';
 
-type RouteParams = { params: Promise<{ workspaceId: string }> };
+type RouteParams = { params: Promise<{ id: string }> };
 
 /**
  * Maps a Prisma CanvasArtifact row to the client-side type
@@ -44,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   if (authResult instanceof NextResponse) return authResult;
   const user = authResult;
 
-  const { workspaceId } = await params;
+  const { id: workspaceId } = await params;
 
   // Verify membership
   const membership = await prisma.workspaceMember.findFirst({

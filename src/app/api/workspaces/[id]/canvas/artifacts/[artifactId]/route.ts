@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/auth-utils';
 import type { CanvasArtifact } from '@/lib/canvas/types';
 
-type RouteParams = { params: Promise<{ workspaceId: string; artifactId: string }> };
+type RouteParams = { params: Promise<{ id: string; artifactId: string }> };
 
 const UpdateArtifactSchema = z.object({
   title: z.string().max(200).optional().nullable(),
@@ -25,7 +25,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (authResult instanceof NextResponse) return authResult;
   const user = authResult;
 
-  const { workspaceId, artifactId } = await params;
+  const { id: workspaceId, artifactId } = await params;
 
   // Verify membership
   const membership = await prisma.workspaceMember.findFirst({
