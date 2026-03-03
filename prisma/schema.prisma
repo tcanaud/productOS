@@ -145,21 +145,45 @@ model AIUsageLog {
 // ── Studio model (Multi-Studio Persistence) ──────────────────────────────────
 
 model Studio {
-  id             String    @id @default(cuid())
-  workspaceId    String
-  title          String    @default("Untitled Studio")
-  status         String    @default("active") // "active" | "completed"
-  graphState     Json?     // StudioSessionState serialized
-  checkpoint     Json?     // RunCheckpoint serialized
-  sseSessionId   String?
-  messageHistory Json?     // Message[] from frontend (personas, roundtable included)
-  diagramId      String?   @unique
-  diagram        Diagram?  @relation(fields: [diagramId], references: [id], onDelete: SetNull)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id               String             @id @default(cuid())
+  workspaceId      String
+  title            String             @default("Untitled Studio")
+  status           String             @default("active") // "active" | "completed"
+  graphState       Json?              // StudioSessionState serialized
+  checkpoint       Json?              // RunCheckpoint serialized
+  sseSessionId     String?
+  messageHistory   Json?              // Message[] from frontend (personas, roundtable included)
+  diagramId        String?            @unique
+  diagram          Diagram?           @relation(fields: [diagramId], references: [id], onDelete: SetNull)
+  headCheckpointId String?            // Points to current active checkpoint node
+  activeBranchName String             @default("main")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  workspace        Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  checkpoints      StudioCheckpoint[]
 
   @@index([workspaceId, updatedAt])
+}
+
+model StudioCheckpoint {
+  id             String             @id @default(cuid())
+  studioId       String
+  parentId       String?
+  branchName     String             @default("main")
+  turnNumber     Int
+  checkpoint     Json               // Immutable RunCheckpoint blob
+  graphState     Json               // StudioSessionState snapshot
+  messageHistory Json?              // Message[] snapshot at this point
+  userMessage    String             // User message that produced this state
+  mermaidPreview String?            // Mermaid syntax for timeline thumbnail
+  createdAt      DateTime           @default(now())
+
+  studio         Studio             @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  parent         StudioCheckpoint?  @relation("CheckpointTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       StudioCheckpoint[] @relation("CheckpointTree")
+
+  @@index([studioId, branchName, turnNumber])
+  @@index([studioId, createdAt])
 }
 
 // ── Canvas models (Story 8.1) ─────────────────────────────────────────────────

@@ -58,14 +58,18 @@ function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
 
     if (pausedNode === 'present-diagram-to-user') {
       if (state.lastPatch) {
-        // Incremental patch update
-        sessionEventBus.emit(sessionId, 'diagram-update', { patch: state.lastPatch });
+        // Incremental patch update — include AI summary when available
+        sessionEventBus.emit(sessionId, 'diagram-update', {
+          patch: state.lastPatch,
+          ...(state.mergedResponse ? { summary: state.mergedResponse } : {}),
+        });
       } else if (state.currentDiagram) {
         // Full diagram generation
         const mermaidSyntax = json2mermaid(state.currentDiagram);
         sessionEventBus.emit(sessionId, 'diagram-full', {
           jsonGraph: state.currentDiagram,
           mermaidSyntax,
+          summary: 'Here\'s the diagram I\'ve generated based on our conversation.',
         });
       }
       return;

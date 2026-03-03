@@ -33,7 +33,8 @@ You MUST return ONLY a DiagramPatch JSON object. Do NOT return the full graph. I
   "removeNodes": ["nodeId1", "nodeId2"],
   "addEdges":    [{ "id": "...", "from": "...", "to": "...", "label": "..." }],
   "removeEdges": ["edgeId1", "edgeId2"],
-  "modifyNodes": [{ "id": "...", "label": "...", "type": "..." }]
+  "modifyNodes": [{ "id": "...", "label": "...", "type": "..." }],
+  "summary":     "Brief explanation of WHAT was changed and WHY (1-2 sentences, user-facing)"
 }
 \`\`\`
 
@@ -54,7 +55,8 @@ Patch:
 \`\`\`json
 {
   "addNodes": [{ "id": "err1", "label": "Payment Failed?", "type": "rhombus" }],
-  "addEdges": [{ "id": "e-pay-err1", "from": "payment", "to": "err1", "label": "failure" }]
+  "addEdges": [{ "id": "e-pay-err1", "from": "payment", "to": "err1", "label": "failure" }],
+  "summary": "Added a 'Payment Failed?' decision node after payment to handle error cases."
 }
 \`\`\`
 
@@ -62,7 +64,8 @@ Instruction: "Remove the notification step"
 Patch:
 \`\`\`json
 {
-  "removeNodes": ["notify"]
+  "removeNodes": ["notify"],
+  "summary": "Removed the notification step and its connections from the flow."
 }
 \`\`\`
 
@@ -70,7 +73,8 @@ Instruction: "Rename 'Checkout' to 'Payment Processing'"
 Patch:
 \`\`\`json
 {
-  "modifyNodes": [{ "id": "checkout", "label": "Payment Processing" }]
+  "modifyNodes": [{ "id": "checkout", "label": "Payment Processing" }],
+  "summary": "Renamed 'Checkout' to 'Payment Processing' for clarity."
 }
 \`\`\`
 
@@ -78,7 +82,8 @@ Instruction: "Connect Cart directly to Confirmation"
 Patch:
 \`\`\`json
 {
-  "addEdges": [{ "id": "e-cart-confirm", "from": "cart", "to": "confirm" }]
+  "addEdges": [{ "id": "e-cart-confirm", "from": "cart", "to": "confirm" }],
+  "summary": "Added a direct connection from Cart to Confirmation, creating a shortcut path."
 }
 \`\`\`
 

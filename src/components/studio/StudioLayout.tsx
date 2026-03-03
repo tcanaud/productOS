@@ -19,6 +19,11 @@ import type {
 import { json2mermaid } from '@/lib/json2mermaid';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
+import type { LiveReviewItem } from '@/lib/session/types';
+import { ReviewTaskPanel } from './ReviewTaskPanel';
+import { CheckpointTimeline } from './CheckpointTimeline';
+import { useCheckpointTree } from '@/hooks/useCheckpointTree';
+import type { StudioSessionState } from '@/lib/graphs/studio-session.types';
 
 export type PersonaBubble = {
   personaId: string;
@@ -72,9 +77,13 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   const checkpointRef = useRef<unknown>(null);
   // Timer ref for clearing patchAnimation after 800ms (covers add 600ms + remove 400ms)
   const patchAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Story 7.3: live review annotations
-  const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const liveReviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live review items (persistent todo-list panel)
+  const [liveReviewItems, setLiveReviewItems] = useState<LiveReviewItem[]>([]);
+  const [isReviewRunning, setIsReviewRunning] = useState(false);
+
+  // Checkpoint tree for undo/redo/branching
+  const cpTree = useCheckpointTree();
+  const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -131,6 +140,9 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         if (data.sseSessionId) {
           setSessionId(data.sseSessionId);
         }
+
+        // Load checkpoint tree (includes lazy migration on the server side)
+        if (studioId) await cpTree.loadTree(workspaceId, studioId);
       } catch {
         toast.error('Failed to load studio');
       } finally {
@@ -143,6 +155,27 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       cancelled = true;
     };
   }, [studioId, workspaceId]);
+
+  // Prune review items whose nodeId no longer exists in the current graph
+  const pruneStaleReviewItems = useCallback((graph: JsonGraph) => {
+    const nodeIds = new Set(graph.nodes.map((n) => n.id));
+    setLiveReviewItems((prev) => {
+      const filtered = prev.filter((item) => nodeIds.has(item.nodeId));
+      if (filtered.length < prev.length) {
+        // Persist pruned list (best-effort)
+        fetch('/api/ai/live-review', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId,
+            studioId: currentStudioIdRef.current,
+            dismissIds: prev.filter((item) => !nodeIds.has(item.nodeId)).map((item) => item.id),
+          }),
+        }).catch(() => {});
+      }
+      return filtered;
+    });
+  }, [workspaceId]);
 
   // Process incoming SSE events in arrival order
   useEffect(() => {
@@ -203,16 +236,42 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       } else if (event.type === 'diagram-full') {
         const payload = event.data as DiagramFullPayload;
         currentGraphRef.current = payload.jsonGraph;
+        pruneStaleReviewItems(payload.jsonGraph);
         setIsStreaming(true);
         setTimeout(() => {
           setDiagramContent(payload.mermaidSyntax);
           setIsStreaming(false);
         }, 600);
+        // Inject summary as chat message
+        if (payload.summary) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `${event.id}-summary`,
+              role: 'assistant' as const,
+              content: payload.summary!,
+              timestamp: new Date(event.timestamp),
+            },
+          ]);
+        }
         setIsLoading(false);
       } else if (event.type === 'diagram-update') {
         const payload = event.data as DiagramUpdatePayload;
         if (currentGraphRef.current) {
           currentGraphRef.current = applyPatch(currentGraphRef.current, payload.patch);
+          pruneStaleReviewItems(currentGraphRef.current);
+        }
+        // Inject summary as chat message
+        if (payload.summary) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `${event.id}-summary`,
+              role: 'assistant' as const,
+              content: payload.summary!,
+              timestamp: new Date(event.timestamp),
+            },
+          ]);
         }
         const patch = payload.patch;
         const addNodeIds = patch.addNodes?.map((n) => n.id) ?? [];
@@ -243,48 +302,76 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         setSessionId(null);
       }
     }
-  }, [events]);
+  }, [events, pruneStaleReviewItems]);
 
-  // Story 7.3: trigger live review 2s after diagram content changes
+  // Load persisted live review items on hydration (scoped to current studio)
   useEffect(() => {
-    if (!diagramContent || !currentGraphRef.current) return;
+    if (!workspaceId || !currentStudioId) return;
+    const params = new URLSearchParams({ workspaceId, studioId: currentStudioId });
+    fetch(`/api/ai/live-review?${params}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.liveReviewItems) setLiveReviewItems(data.liveReviewItems);
+      })
+      .catch(() => {});
+  }, [workspaceId, currentStudioId]);
 
-    if (liveReviewTimerRef.current) clearTimeout(liveReviewTimerRef.current);
+  // Manual live review trigger
+  const handleReanalyze = useCallback(async () => {
+    const graph = currentGraphRef.current;
+    if (!graph) return;
+    setIsReviewRunning(true);
+    try {
+      const res = await fetch('/api/ai/live-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, studioId: currentStudioId, graph }),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { liveReviewItems: LiveReviewItem[] };
+      setLiveReviewItems(data.liveReviewItems ?? []);
+    } catch {
+      // Best-effort
+    } finally {
+      setIsReviewRunning(false);
+    }
+  }, [workspaceId, currentStudioId]);
 
-    liveReviewTimerRef.current = setTimeout(async () => {
-      const graph = currentGraphRef.current;
-      if (!graph) return;
-      try {
-        const res = await fetch(`/api/ai/live-review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ workspaceId, graph }),
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { annotations: Annotation[] };
-        setAnnotations(data.annotations ?? []);
-      } catch {
-        // Live review is best-effort; silently ignore errors
-      }
-    }, 2000);
+  // Dismiss a single review item
+  const handleDismissReviewItem = useCallback(
+    (id: string) => {
+      setLiveReviewItems((prev) => prev.filter((item) => item.id !== id));
+      // Persist dismissal (best-effort)
+      fetch('/api/ai/live-review', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId, studioId: currentStudioId, dismissIds: [id] }),
+      }).catch(() => {});
+    },
+    [workspaceId, currentStudioId]
+  );
 
-    return () => {
-      if (liveReviewTimerRef.current) clearTimeout(liveReviewTimerRef.current);
-    };
-  }, [diagramContent, workspaceId]);
+  // Send a review item to chat for discussion
+  const handleSendReviewToChat = useCallback(
+    (item: LiveReviewItem) => {
+      const chatMessage = `I'd like to discuss this review observation about node "${item.nodeId}":\n\n> ${item.message}${item.description ? `\n> ${item.description}` : ''}\n\n${item.suggestions?.length ? `Suggestions: \n- ${item.suggestions.join('\n- ')}` : ''}\n\nWhat do you suggest?`;
+      setInputValue(chatMessage);
+      inputRef.current?.focus();
+    },
+    []
+  );
 
   // Story 7.4: handle graph update from AI node actions (expand / simplify)
   const handleGraphUpdate = useCallback((updatedGraph: JsonGraph) => {
     currentGraphRef.current = updatedGraph;
+    pruneStaleReviewItems(updatedGraph);
     try {
       const mermaid = json2mermaid(updatedGraph);
       setDiagramContent(mermaid);
-      // Clear stale annotations since the graph structure changed
-      setAnnotations([]);
     } catch {
       // If conversion fails, keep the existing diagram content unchanged
     }
-  }, []);
+  }, [pruneStaleReviewItems]);
 
   // Helper to get current messages for persistence (uses a ref to avoid stale closures)
   const messagesRef = useRef<Message[]>(messages);
@@ -328,17 +415,17 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      const body: {
-        userMessage: string;
-        checkpoint?: unknown;
-        sessionId?: string;
-        studioId?: string;
-      } = {
+      const body: Record<string, unknown> = {
         userMessage: answer,
       };
       if (checkpointRef.current) body.checkpoint = checkpointRef.current;
       if (sessionId) body.sessionId = sessionId;
       if (currentStudioId) body.studioId = currentStudioId;
+      // Checkpoint tree tracking
+      if (cpTree.headId) body.headCheckpointId = cpTree.headId;
+      body.activeBranchName = cpTree.activeBranch;
+      body.turnNumber = cpTree.turnNumber;
+      body.messageHistory = messagesRef.current;
 
       try {
         const res = await fetch(`/api/studio/${workspaceId}/interact`, {
@@ -348,30 +435,40 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         });
         if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-        const data = (await res.json()) as
-          | { type: 'question'; content: string; checkpoint: unknown; studioId?: string; personas?: PersonaBubble[]; roundtable?: RoundtableData }
-          | {
-              type: 'diagram';
-              mermaid: string;
-              checkpoint: unknown;
-              patchAnimation?: PatchAnimationEvent;
-              studioId?: string;
-            }
-          | { type: 'complete'; diagramId: string; studioId?: string }
-          | { type: 'error'; message: string };
+        const data = (await res.json()) as Record<string, unknown>;
+
+        // Track checkpoint tree position from response
+        if (data.headCheckpointId) {
+          cpTree.trackTurn(
+            data.headCheckpointId as string,
+            data.activeBranchName as string,
+            data.turnNumber as number
+          );
+        }
 
         if (data.type === 'question') {
           checkpointRef.current = data.checkpoint;
           setIsLoading(false);
         } else if (data.type === 'diagram') {
           checkpointRef.current = data.checkpoint;
+          if (data.summary) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: 'assistant' as const,
+                content: data.summary as string,
+                timestamp: new Date(),
+              },
+            ]);
+          }
           setIsLoading(false);
         } else if (data.type === 'complete') {
           checkpointRef.current = null;
           setSessionId(null);
           setIsLoading(false);
         } else if (data.type === 'error') {
-          throw new Error(data.message);
+          throw new Error(data.message as string);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Something went wrong';
@@ -387,7 +484,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         setIsLoading(false);
       }
     },
-    [workspaceId, sessionId, currentStudioId]
+    [workspaceId, sessionId, currentStudioId, cpTree]
   );
 
   async function handleSend(text: string) {
@@ -415,12 +512,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     }
 
     try {
-      const body: {
-        userMessage: string;
-        checkpoint?: unknown;
-        sessionId?: string;
-        studioId?: string;
-      } = {
+      const body: Record<string, unknown> = {
         userMessage: text.trim(),
         sessionId: currentSessionId,
       };
@@ -430,6 +522,11 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       if (currentStudioId) {
         body.studioId = currentStudioId;
       }
+      // Checkpoint tree tracking
+      if (cpTree.headId) body.headCheckpointId = cpTree.headId;
+      body.activeBranchName = cpTree.activeBranch;
+      body.turnNumber = cpTree.turnNumber;
+      body.messageHistory = messagesRef.current;
 
       const res = await fetch(`/api/studio/${workspaceId}/interact`, {
         method: 'POST',
@@ -441,30 +538,22 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         throw new Error(`Server error ${res.status}`);
       }
 
-      const data = (await res.json()) as
-        | {
-            type: 'question';
-            content: string;
-            checkpoint: unknown;
-            personas?: PersonaBubble[];
-            roundtable?: RoundtableData;
-            studioId?: string;
-          }
-        | {
-            type: 'diagram';
-            mermaid: string;
-            checkpoint: unknown;
-            patchAnimation?: PatchAnimationEvent;
-            studioId?: string;
-          }
-        | { type: 'complete'; diagramId: string; studioId?: string }
-        | { type: 'error'; message: string };
+      const data = (await res.json()) as Record<string, unknown>;
+
+      // Track checkpoint tree position from response
+      if (data.headCheckpointId) {
+        cpTree.trackTurn(
+          data.headCheckpointId as string,
+          data.activeBranchName as string,
+          data.turnNumber as number
+        );
+      }
 
       // Capture studioId from server response (created on first message)
       // Use window.history.replaceState to update URL without triggering a Next.js navigation
       // (router.replace would remount the component and lose all in-memory state)
-      if ('studioId' in data && data.studioId && !currentStudioId) {
-        setCurrentStudioId(data.studioId);
+      if (data.studioId && !currentStudioId) {
+        setCurrentStudioId(data.studioId as string);
         window.history.replaceState(null, '', `/workspaces/${workspaceId}/studio/${data.studioId}`);
       }
 
@@ -474,17 +563,17 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
 
         // When SSE is active AND the response has personas, SSE events already
         // handle rendering persona bubbles + roundtable — skip to avoid duplicates.
-        // Non-persona question responses (plain text) still need to be added here
-        // because the SSE 'interaction' event only sets interactionPayload, not a message.
-        const hasPersonas = data.personas && data.personas.length > 0;
+        const personas = data.personas as PersonaBubble[] | undefined;
+        const roundtable = data.roundtable as RoundtableData | undefined;
+        const hasPersonas = personas && personas.length > 0;
         if (!(currentSessionId && hasPersonas)) {
           const aiMessage: Message = {
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: data.content,
+            content: data.content as string,
             timestamp: new Date(),
-            personas: data.personas,
-            roundtable: data.roundtable,
+            personas,
+            roundtable,
           };
           setMessages((prev) => [...prev, aiMessage]);
         }
@@ -493,17 +582,30 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         // Store checkpoint for potential refinement turns
         checkpointRef.current = data.checkpoint;
 
+        // Inject summary as chat message (both SSE and non-SSE paths)
+        if (data.summary && !currentSessionId) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant' as const,
+              content: data.summary as string,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+
         // When SSE is active, diagram-full / diagram-update events handle rendering.
         if (!currentSessionId) {
           setIsStreaming(true);
           setIsLoading(false);
 
           setTimeout(() => {
-            setDiagramContent(data.mermaid);
+            setDiagramContent(data.mermaid as string);
             setIsStreaming(false);
 
             if (data.patchAnimation) {
-              setPatchAnimation(data.patchAnimation);
+              setPatchAnimation(data.patchAnimation as PatchAnimationEvent);
 
               if (patchAnimationTimerRef.current) {
                 clearTimeout(patchAnimationTimerRef.current);
@@ -523,7 +625,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         }
         checkpointRef.current = null;
       } else if (data.type === 'error') {
-        throw new Error(data.message);
+        throw new Error(data.message as string);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Something went wrong';
@@ -542,6 +644,113 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     setInputValue(chip);
     inputRef.current?.focus();
   }
+
+  // Derive annotations for diagram badge overlay from active live review items
+  const annotations: Annotation[] = liveReviewItems.filter((item) => !item.dismissedAt);
+
+  // Callback for DiagramPreviewPanel to inject summary messages (expand/simplify)
+  const handleSummaryMessage = useCallback((summary: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        content: summary,
+        timestamp: new Date(),
+      },
+    ]);
+  }, []);
+
+  // Checkpoint restore handler — updates all studio state from a past checkpoint
+  const handleCheckpointRestore = useCallback(
+    async (checkpointId: string) => {
+      const sid = currentStudioId;
+      if (!sid) return;
+      setIsLoading(true);
+      const result = await cpTree.restore(workspaceId, sid, checkpointId);
+      if (result) {
+        // Restore checkpoint for graph resumption
+        checkpointRef.current = result.checkpoint;
+        // Restore messages (clear if none saved at this checkpoint)
+        if (result.messageHistory && Array.isArray(result.messageHistory)) {
+          const restored: Message[] = (result.messageHistory as Record<string, unknown>[]).map(
+            (m) => ({
+              ...m,
+              timestamp: new Date(m.timestamp as string),
+            })
+          ) as Message[];
+          setMessages(restored);
+        } else {
+          setMessages([]);
+        }
+        // Restore diagram from graphState (clear if no diagram at this checkpoint)
+        const gs = result.graphState as StudioSessionState;
+        if (gs?.currentDiagram) {
+          currentGraphRef.current = gs.currentDiagram as JsonGraph;
+          pruneStaleReviewItems(gs.currentDiagram as JsonGraph);
+          try {
+            const mermaid = json2mermaid(gs.currentDiagram as JsonGraph);
+            setDiagramContent(mermaid);
+          } catch {
+            // Best-effort
+          }
+        } else {
+          currentGraphRef.current = null;
+          setDiagramContent(undefined);
+          setLiveReviewItems([]);
+        }
+        // Clear interaction widget and animation state
+        setInteractionPayload(undefined);
+        setPatchAnimation(undefined);
+        toast.success(`Restored to turn ${result.turnNumber}`);
+      } else {
+        toast.error('Failed to restore checkpoint');
+      }
+      setIsLoading(false);
+    },
+    [workspaceId, currentStudioId, cpTree, pruneStaleReviewItems]
+  );
+
+  // Checkpoint fork handler — creates a new studio from a past checkpoint
+  const handleCheckpointFork = useCallback(
+    async (checkpointId: string) => {
+      const sid = currentStudioId;
+      if (!sid) return;
+      const result = await cpTree.fork(workspaceId, sid, checkpointId, 'Forked Studio');
+      if (result) {
+        // Navigate to the new studio
+        window.location.href = `/workspaces/${workspaceId}/studio/${result.studioId}`;
+      } else {
+        toast.error('Failed to fork studio');
+      }
+    },
+    [workspaceId, currentStudioId, cpTree]
+  );
+
+  // Keyboard shortcuts: Ctrl+Z → undo, Ctrl+Shift+Z → redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Skip if chat input is focused
+      if (
+        document.activeElement instanceof HTMLTextAreaElement ||
+        document.activeElement instanceof HTMLInputElement
+      ) {
+        return;
+      }
+
+      const isMeta = e.ctrlKey || e.metaKey;
+      if (isMeta && e.key === 'z' && !e.shiftKey && cpTree.canUndo && cpTree.undoId) {
+        e.preventDefault();
+        void handleCheckpointRestore(cpTree.undoId);
+      }
+      if (isMeta && e.key === 'z' && e.shiftKey && cpTree.canRedo && cpTree.redoId) {
+        e.preventDefault();
+        void handleCheckpointRestore(cpTree.redoId);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [cpTree.canUndo, cpTree.canRedo, cpTree.undoId, cpTree.redoId, handleCheckpointRestore]);
 
   // Show loading spinner while hydrating from DB
   if (!isHydrated) {
@@ -582,17 +791,56 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
             />
           </div>
         )}
+
+        {/* Checkpoint timeline — collapsible section */}
+        {cpTree.tree.length > 0 && (
+          <div className="border-t border-border">
+            <button
+              type="button"
+              onClick={() => setIsTimelineExpanded((prev) => !prev)}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
+            >
+              <span>Timeline ({cpTree.tree.length})</span>
+              <span>{isTimelineExpanded ? '\u25B2' : '\u25BC'}</span>
+            </button>
+            {isTimelineExpanded && (
+              <CheckpointTimeline
+                tree={cpTree.tree}
+                headId={cpTree.headId}
+                activeBranch={cpTree.activeBranch}
+                onRestore={handleCheckpointRestore}
+                onFork={handleCheckpointFork}
+              />
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex-1 overflow-hidden">
-        <DiagramPreviewPanel
-          diagramContent={diagramContent}
-          isStreaming={isStreaming}
-          patchAnimation={patchAnimation}
-          graph={currentGraphRef.current ?? undefined}
-          annotations={annotations}
-          onGraphUpdate={handleGraphUpdate}
-          workspaceId={workspaceId}
-        />
+      <div className="flex flex-1 overflow-hidden">
+        {/* Diagram panel */}
+        <div className="flex-1 overflow-hidden">
+          <DiagramPreviewPanel
+            diagramContent={diagramContent}
+            isStreaming={isStreaming}
+            patchAnimation={patchAnimation}
+            graph={currentGraphRef.current ?? undefined}
+            annotations={annotations}
+            isReviewRunning={isReviewRunning}
+            onGraphUpdate={handleGraphUpdate}
+            onSummaryMessage={handleSummaryMessage}
+            workspaceId={workspaceId}
+          />
+        </div>
+
+        {/* Live Review Panel */}
+        <div className="w-72 flex-shrink-0 border-l border-border overflow-hidden">
+          <ReviewTaskPanel
+            items={liveReviewItems}
+            isAnalyzing={isReviewRunning}
+            onReanalyze={handleReanalyze}
+            onDismiss={handleDismissReviewItem}
+            onSendToChat={handleSendReviewToChat}
+          />
+        </div>
       </div>
     </div>
   );

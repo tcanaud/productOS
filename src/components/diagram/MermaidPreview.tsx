@@ -60,6 +60,8 @@ export function MermaidPreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const prevGraphRef = useRef<JsonGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Incremented after every Mermaid render to trigger badge re-injection
+  const [renderGeneration, setRenderGeneration] = useState(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -122,18 +124,8 @@ export function MermaidPreview({
             prevGraphRef.current = graph;
           }
 
-          // ── Inject review badges ──────────────────────────────────────────
-          if (annotations?.length) {
-            injectBadges(svgEl as unknown as SVGSVGElement, annotations);
-          }
-
-          // ── Wire badge click → onBadgeClick ──────────────────────────────
-          if (onBadgeClick) {
-            svgEl.addEventListener('review-badge-click', ((e: Event) => {
-              const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
-              onBadgeClick(ce.detail.nodeId, ce.detail.annotation);
-            }) as EventListener);
-          }
+          // Bump render generation so the badge useEffect re-injects onto the new SVG
+          setRenderGeneration((g) => g + 1);
         }
 
         // ── Attach node handlers ──────────────────────────────────────────────
@@ -182,9 +174,10 @@ export function MermaidPreview({
     };
 
     void renderMermaid();
-  }, [content, graph, annotations, onNodeClick, onEdgeClick, onBadgeClick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, graph, onNodeClick, onEdgeClick]);
 
-  // ── Re-inject badges when annotations change without a full diagram re-render ──
+  // ── Inject badges + heatmap when annotations or SVG change ─────────────────
   useEffect(() => {
     if (!containerRef.current) return;
     const svgEl = containerRef.current.querySelector('svg') as SVGSVGElement | null;
@@ -192,17 +185,14 @@ export function MermaidPreview({
 
     injectBadges(svgEl, annotations ?? []);
 
-    if (onBadgeClick) {
-      // Re-attach handler: remove old listener by replacing the element's event
-      // (injectBadges already dispatches on svgEl, so listener on svgEl is sufficient)
-      const handler = ((e: Event) => {
-        const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
-        onBadgeClick(ce.detail.nodeId, ce.detail.annotation);
-      }) as EventListener;
-      svgEl.addEventListener('review-badge-click', handler);
-      return () => svgEl.removeEventListener('review-badge-click', handler);
-    }
-  }, [annotations, onBadgeClick]);
+    // Wire badge click → onBadgeClick (cleanup removes previous listener)
+    const handler = ((e: Event) => {
+      const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
+      onBadgeClick?.(ce.detail.nodeId, ce.detail.annotation);
+    }) as EventListener;
+    svgEl.addEventListener('review-badge-click', handler);
+    return () => svgEl.removeEventListener('review-badge-click', handler);
+  }, [annotations, onBadgeClick, renderGeneration]);
 
   return (
     <div className="relative h-full w-full overflow-auto bg-white p-4">

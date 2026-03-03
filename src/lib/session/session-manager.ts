@@ -11,7 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from '@/lib/prisma';
 import { scaffoldSessionDir, removeSessionDir, getSessionDir } from './session-scaffolder';
-import type { SessionContext, SessionArtifacts } from './types';
+import { readSessionBmadConfig } from './config-reader';
+import type { SessionContext, SessionArtifacts, LiveReviewItem } from './types';
 
 /** Regex that workspaceIds must match before FS use. */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
@@ -77,6 +78,7 @@ export const sessionManager = {
 
     const memory = readFileOrEmpty(path.join(sessionDir, '_bmad', 'memory', 'MEMORY.md'));
     const decisions = readFileOrEmpty(path.join(sessionDir, '_bmad', 'memory', 'decisions.md'));
+    const bmadConfig = readSessionBmadConfig(sessionDir);
 
     return {
       workspaceId,
@@ -84,6 +86,7 @@ export const sessionManager = {
       memory,
       decisions,
       isNew: !alreadyExists,
+      bmadConfig,
     };
   },
 
@@ -118,12 +121,25 @@ export const sessionManager = {
       );
     }
 
-    // Persist review annotations
+    // Persist review annotations (legacy timestamped format)
     if (artifacts.reviews) {
       const reviewsDir = path.join(sessionDir, '_bmad', 'artifacts', 'reviews');
       fs.writeFileSync(
         path.join(reviewsDir, `review_${timestamp}.json`),
         JSON.stringify(artifacts.reviews, null, 2),
+        'utf-8'
+      );
+    }
+
+    // Persist live review items (todo-list panel state), scoped by studioId when provided
+    if (artifacts.liveReviewItems !== undefined) {
+      const reviewsDir = path.join(sessionDir, '_bmad', 'artifacts', 'reviews');
+      const filename = artifacts.studioId
+        ? `live-review-items-${artifacts.studioId}.json`
+        : 'live-review-items.json';
+      fs.writeFileSync(
+        path.join(reviewsDir, filename),
+        JSON.stringify(artifacts.liveReviewItems, null, 2),
         'utf-8'
       );
     }
@@ -160,6 +176,24 @@ export const sessionManager = {
         lastActivity: new Date(),
       },
     });
+  },
+
+  /**
+   * Load persisted live review items for a workspace session.
+   * When studioId is provided, loads items scoped to that studio.
+   * Returns an empty array if no items have been persisted yet.
+   */
+  loadLiveReviewItems(workspaceId: string, studioId?: string): LiveReviewItem[] {
+    assertSafeId(workspaceId);
+    const sessionDir = getSessionDir(workspaceId);
+    const filename = studioId ? `live-review-items-${studioId}.json` : 'live-review-items.json';
+    const filePath = path.join(sessionDir, '_bmad', 'artifacts', 'reviews', filename);
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(raw) as LiveReviewItem[];
+    } catch {
+      return [];
+    }
   },
 
   /**

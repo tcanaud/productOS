@@ -27,9 +27,12 @@ export interface Annotation {
 
 interface LiveReviewState {
   graph: JsonGraph;
+  /** Output language for annotations (from BMAD config). Defaults to 'English'. */
+  language: string;
   // Set by extract-nodes
   nodeList?: { id: string; label: string }[];
   nodesText?: string;
+  edgesText?: string;
   // Set by LLMNode (keyed by node id: 'review')
   review?: unknown;
   // Set by map-annotations
@@ -54,7 +57,7 @@ const AnnotationRawSchema = z.array(
 export function createLiveReviewGraph() {
   const graph = new Graph('extract-nodes');
 
-  // Node 1: extract node list from JsonGraph
+  // Node 1: extract full graph context (nodes + edges) from JsonGraph
   graph.addNode(
     new FnNode({
       id: 'extract-nodes',
@@ -69,45 +72,66 @@ export function createLiveReviewGraph() {
         }
 
         const nodeList = jsonGraph.nodes.map((n) => ({ id: n.id, label: n.label }));
-        const nodesText = nodeList.map((n) => `- id: "${n.id}", label: "${n.label}"`).join('\n');
+        const nodesText = nodeList
+          .map((n) => `- id: "${n.id}", label: "${n.label}"`)
+          .join('\n');
+        const edgesText = (jsonGraph.edges ?? [])
+          .map((e) => `- "${e.from}" → "${e.to}"${e.label ? ` [${e.label}]` : ''}`)
+          .join('\n');
 
         return {
           kind: 'continue' as const,
-          statePatch: { nodeList, nodesText },
+          statePatch: { nodeList, nodesText, edgesText },
         };
       },
     })
   );
 
-  // Node 2: LLMNode — ask Claude to identify issues per node
+  // Node 2: LLMNode — Opus-powered contextual review
   graph.addNode(
     new LLMNode({
       id: 'review',
       provider: 'claude',
+      providerOptions: { model: 'claude-opus-4-6' },
       schema: AnnotationRawSchema,
       prompt: (ctx) => {
         const state = ctx.state as LiveReviewState;
+        const lang = state.language || 'English';
+        const diagramType = state.graph.diagramType ?? 'flowchart';
+        const title = state.graph.title ? `Diagram title: "${state.graph.title}"` : '';
         return [
-          'You are a product process analyst reviewing a business flow diagram.',
-          'Given the following list of nodes (each with an id and a label), identify potential issues,',
-          'missing edge cases, or risks for each node that warrants attention.',
+          'You are an expert process modeler and systems architect.',
+          'Analyze this business flow diagram in depth, considering both its structure and the domain it represents.',
+          '',
+          title,
+          `Diagram type: ${diagramType}`,
           '',
           'Nodes:',
           state.nodesText ?? '',
           '',
-          'Return a JSON array. Each element must have:',
-          '- "nodeId": the exact node id from the input',
-          '- "severity": one of "ok" | "medium" | "high" | "critical"',
-          '- "message": a single sentence (max 120 chars) summarizing the issue',
-          '- "description": optional, longer explanation',
-          '- "suggestions": optional array of actionable suggestions',
+          'Edges (connections):',
+          state.edgesText ?? '(none)',
           '',
-          'Return ONLY the JSON array, no markdown, no commentary.',
-          'Omit nodes that have no issues (severity "ok" entries are optional).',
+          'Perform a multi-level analysis:',
+          '1. **Structural integrity**: orphan nodes, dead ends, missing error/exception paths, unreachable nodes, cycles without exit.',
+          '2. **Semantic coherence**: node naming consistency, logical ordering of steps, missing intermediate steps.',
+          '3. **Domain best practices**: based on the detected domain (e-commerce, auth, data pipeline, etc.), flag missing industry-standard steps (e.g. validation, error handling, notifications, rollback).',
+          '4. **Flow completeness**: missing alternative paths (happy path vs error path), missing start/end nodes, ambiguous branching.',
+          '',
+          'Rules:',
+          '- Return 5 to 8 high-quality observations, sorted by severity (critical first).',
+          '- Quality over quantity: each observation must be insightful and actionable.',
+          '- Every observation MUST include "suggestions" with at least one concrete fix.',
+          '- Only flag genuine issues. Return [] if the diagram is well-designed.',
+          '',
+          'Return a raw JSON array (NO markdown fences, NO ```json blocks, NO commentary before/after).',
+          'Each element: {"nodeId":"<exact id>","severity":"medium"|"high"|"critical","message":"<max 120 chars>","description":"<detailed explanation>","suggestions":["<concrete action>"]}',
+          'Your entire response must be parseable by JSON.parse() directly.',
+          `Write all "message", "description" and "suggestions" values in ${lang}.`,
         ].join('\n');
       },
       maxRepairs: 2,
-      timeoutMs: 60_000,
+      timeoutMs: 2*180_000,
     })
   );
 
@@ -169,11 +193,14 @@ export function createLiveReviewGraph() {
 
 // ─── Runner ────────────────────────────────────────────────────────────────────
 
-export async function runLiveReview(jsonGraph: JsonGraph): Promise<Annotation[]> {
+export async function runLiveReview(
+  jsonGraph: JsonGraph,
+  language = 'English'
+): Promise<Annotation[]> {
   const graph = createLiveReviewGraph();
   const runner = new GraphRunner(graph, { maxSteps: 10 });
 
-  const initialState: LiveReviewState = { graph: jsonGraph };
+  const initialState: LiveReviewState = { graph: jsonGraph, language };
   const result = await runner.run(initialState);
   const finalState = result.state as LiveReviewState;
 

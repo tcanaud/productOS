@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth-utils';
 import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@/generated/prisma/client';
 import { studioPersistence } from '@/lib/studio/studio-persistence';
 
 type RouteParams = { params: Promise<{ id: string; studioId: string }> };
@@ -78,6 +79,25 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   if (body.messageHistory && Array.isArray(body.messageHistory)) {
     await studioPersistence.saveMessages(studioId, body.messageHistory);
+
+    // Also update messageHistory on the HEAD checkpoint (if any) so that
+    // restoring a checkpoint always has the full message history.
+    // The debounced save fires after SSE events have settled, so this
+    // captures persona messages that weren't available during the POST.
+    const studio = await prisma.studio.findUnique({
+      where: { id: studioId },
+      select: { headCheckpointId: true },
+    });
+    if (studio?.headCheckpointId) {
+      await prisma.studioCheckpoint.update({
+        where: { id: studio.headCheckpointId },
+        data: {
+          messageHistory: body.messageHistory as unknown as Prisma.InputJsonValue,
+        },
+      }).catch(() => {
+        // Best-effort — checkpoint may have been deleted
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

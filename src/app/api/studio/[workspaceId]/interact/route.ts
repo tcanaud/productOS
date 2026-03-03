@@ -25,6 +25,7 @@ import type { RunCheckpoint } from '@/lib/graphs/studio-session.runner';
 import type { StudioSessionState, PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import { sessionManager } from '@/lib/session/session-manager';
 import { studioPersistence } from '@/lib/studio/studio-persistence';
+import { checkpointPersistence } from '@/lib/studio/checkpoint-persistence';
 
 /** Derive a PatchAnimationEvent from the last applied patch for frontend animation. */
 function derivePatchAnimation(state: StudioSessionState): PatchAnimationEvent | undefined {
@@ -65,6 +66,10 @@ export async function POST(
     checkpoint?: RunCheckpoint;
     sessionId?: string;
     studioId?: string;
+    headCheckpointId?: string;
+    activeBranchName?: string;
+    turnNumber?: number;
+    messageHistory?: unknown[];
   };
   try {
     body = await request.json();
@@ -124,6 +129,35 @@ export async function POST(
         checkpoint: outcome.status === 'paused' ? outcome.checkpoint : null,
         sseSessionId: sessionId,
       });
+    }
+
+    // Create checkpoint node in the tree after each turn
+    let newCheckpointInfo: { id: string; branchName: string; turnNumber: number } | null = null;
+    if (studioId && outcome.status === 'paused') {
+      const parentCheckpointId = body.headCheckpointId ?? null;
+      const branchName = body.activeBranchName ?? 'main';
+
+      let mermaidPreview: string | null = null;
+      if (finalState.currentDiagram) {
+        try {
+          mermaidPreview = json2mermaid(finalState.currentDiagram);
+        } catch {
+          // Best-effort preview
+        }
+      }
+
+      newCheckpointInfo = await checkpointPersistence.createCheckpoint(studioId, {
+        parentId: parentCheckpointId,
+        branchName,
+        turnNumber: (body.turnNumber ?? 0) + 1,
+        checkpoint: outcome.checkpoint,
+        graphState: finalState,
+        messageHistory: body.messageHistory,
+        userMessage: userMessage.trim(),
+        mermaidPreview,
+      });
+
+      await checkpointPersistence.updateHead(studioId, newCheckpointInfo.id, newCheckpointInfo.branchName);
     }
 
     if (outcome.status === 'ended') {
@@ -210,6 +244,15 @@ export async function POST(
       return NextResponse.json({ type: 'complete', diagramId: diagram.id, studioId });
     }
 
+    // Checkpoint tracking fields for client
+    const cpPayload = newCheckpointInfo
+      ? {
+          headCheckpointId: newCheckpointInfo.id,
+          activeBranchName: newCheckpointInfo.branchName,
+          turnNumber: newCheckpointInfo.turnNumber,
+        }
+      : {};
+
     if (outcome.status === 'paused') {
       const pausedNode = outcome.pausedAtNode;
       const pendingRequest = outcome.request;
@@ -228,7 +271,9 @@ export async function POST(
           checkpoint: serializedCheckpoint,
           ...(finalState.lastPatch ? { patch: finalState.lastPatch } : {}),
           ...(patchAnimation ? { patchAnimation } : {}),
+          ...(finalState.mergedResponse ? { summary: finalState.mergedResponse } : {}),
           studioId,
+          ...cpPayload,
         });
       }
 
@@ -250,6 +295,7 @@ export async function POST(
         ...personasPayload,
         ...roundtablePayload,
         studioId,
+        ...cpPayload,
       });
     }
 

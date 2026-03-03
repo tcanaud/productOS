@@ -44,11 +44,15 @@ export interface InteractionPayload {
 
 export interface DiagramUpdatePayload {
   patch: DiagramPatch;
+  /** AI-generated contextual summary of changes + micro-delta. */
+  summary?: string;
 }
 
 export interface DiagramFullPayload {
   jsonGraph: JsonGraph;
   mermaidSyntax: string;
+  /** AI-generated summary for initial diagram generation. */
+  summary?: string;
 }
 
 export interface ReviewAnnotationPayload {

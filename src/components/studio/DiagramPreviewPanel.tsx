@@ -31,10 +31,14 @@ export type DiagramPreviewPanelProps = {
   graph?: JsonGraph;
   /** Review annotations from the live-review graph — rendered as SVG badge overlays. */
   annotations?: Annotation[];
+  /** Whether a live review is currently in progress. */
+  isReviewRunning?: boolean;
   /** Called when the user selects an action from the context menu. */
   onDiagramAction?: (action: DiagramAction) => void;
   /** Called when an AI node action produces an updated graph (expand / simplify). */
   onGraphUpdate?: (updatedGraph: JsonGraph) => void;
+  /** Called when an AI action produces a summary message for the chat. */
+  onSummaryMessage?: (summary: string) => void;
   /** Workspace ID — required for AI node actions. */
   workspaceId?: string;
 };
@@ -45,8 +49,10 @@ export function DiagramPreviewPanel({
   patchAnimation,
   graph,
   annotations,
+  isReviewRunning = false,
   onDiagramAction,
   onGraphUpdate,
+  onSummaryMessage,
   workspaceId,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
@@ -123,6 +129,15 @@ export function DiagramPreviewPanel({
 
         const data = (await res.json()) as { graph: JsonGraph };
         onGraphUpdate?.(data.graph);
+
+        // Generate summary for expand/simplify actions
+        const nodeLabel = graph.nodes.find((n) => n.id === action.nodeId)?.label ?? action.nodeId;
+        const actionVerb = action.type === 'expand-node' ? 'Expanded' : 'Simplified';
+        const newCount = data.graph.nodes.length;
+        const oldCount = graph.nodes.length;
+        const delta = newCount - oldCount;
+        const deltaText = delta > 0 ? `+${delta} node(s)` : delta < 0 ? `${delta} node(s)` : 'restructured';
+        onSummaryMessage?.(`${actionVerb} node "${nodeLabel}" (${deltaText}).`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Something went wrong';
         toast.error(`Action failed: ${msg}`);
@@ -132,7 +147,7 @@ export function DiagramPreviewPanel({
         setIsProcessing(false);
       }
     },
-    [onDiagramAction, onGraphUpdate, graph, annotations, workspaceId]
+    [onDiagramAction, onGraphUpdate, onSummaryMessage, graph, annotations, workspaceId]
   );
 
   const closeMenu = useCallback(() => setContextMenu(null), []);
@@ -210,6 +225,17 @@ export function DiagramPreviewPanel({
             onEdgeClick={handleEdgeClick}
             onBadgeClick={handleBadgeClick}
           />
+
+          {/* Live review running indicator */}
+          {isReviewRunning && (
+            <div className="absolute top-3 right-3 flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 shadow-sm backdrop-blur-sm">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              </span>
+              <span className="text-xs text-muted-foreground">Analyzing…</span>
+            </div>
+          )}
 
           {/* AI processing spinner overlay */}
           {isProcessing && (

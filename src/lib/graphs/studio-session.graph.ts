@@ -242,6 +242,8 @@ const DiagramPatchSchema = z.object({
     .optional(),
   removeEdges: z.array(z.string()).optional(),
   modifyNodes: z.array(z.object({ id: z.string() }).passthrough()).optional(),
+  /** AI-generated contextual summary explaining WHY the changes were made. */
+  summary: z.string().optional(),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -690,20 +692,20 @@ export function createStudioSessionGraph() {
 
   // ── Node 9: apply-patch ──────────────────────────────────────────────────
   // Applies refine patch to currentDiagram using the pure applyPatch function.
-  // Stores lastPatch and appends to patchHistory for undo/debug support.
+  // Stores lastPatch, lastPatchSummary, and appends to patchHistory for undo/debug support.
   graph.addNode(
     new FnNode({
       id: 'apply-patch',
       fn: (ctx) => {
         const state = ctx.state as StudioSessionState & {
-          refine?: DiagramPatch;
+          refine?: DiagramPatch & { summary?: string };
         };
 
         if (!state.currentDiagram || !state.refine) {
           return { kind: 'continue' as const, statePatch: {} };
         }
 
-        const patch = state.refine;
+        const { summary, ...patch } = state.refine;
         const updatedDiagram = applyPatch(state.currentDiagram, patch);
         const newPatchHistory = [...(state.patchHistory ?? []), patch];
 
@@ -712,6 +714,7 @@ export function createStudioSessionGraph() {
           statePatch: {
             currentDiagram: updatedDiagram,
             lastPatch: patch,
+            lastPatchSummary: summary,
             patchHistory: newPatchHistory,
           },
         };
@@ -721,7 +724,8 @@ export function createStudioSessionGraph() {
 
   // ── Node 9b: build-patch-confirmation ────────────────────────────────────
   // Builds a human-readable summary of the patch that was applied.
-  // Stored as the mergedResponse for the diagram presentation node to include.
+  // Uses the AI-generated summary (from refine LLM) when available,
+  // with a structured micro-delta appended for precision.
   graph.addNode(
     new FnNode({
       id: 'build-patch-confirmation',
@@ -732,16 +736,21 @@ export function createStudioSessionGraph() {
           return { kind: 'continue' as const, statePatch: {} };
         }
 
+        // Micro-delta: structured count of changes
         const parts: string[] = [];
-        if (patch.addNodes?.length) parts.push(`Added ${patch.addNodes.length} node(s)`);
-        if (patch.removeNodes?.length) parts.push(`Removed ${patch.removeNodes.length} node(s)`);
-        if (patch.addEdges?.length) parts.push(`Added ${patch.addEdges.length} edge(s)`);
-        if (patch.removeEdges?.length) parts.push(`Removed ${patch.removeEdges.length} edge(s)`);
-        if (patch.modifyNodes?.length) parts.push(`Updated ${patch.modifyNodes.length} node(s)`);
+        if (patch.addNodes?.length) parts.push(`+${patch.addNodes.length} node(s)`);
+        if (patch.removeNodes?.length) parts.push(`-${patch.removeNodes.length} node(s)`);
+        if (patch.addEdges?.length) parts.push(`+${patch.addEdges.length} edge(s)`);
+        if (patch.removeEdges?.length) parts.push(`-${patch.removeEdges.length} edge(s)`);
+        if (patch.modifyNodes?.length) parts.push(`~${patch.modifyNodes.length} node(s)`);
+        const microDelta = parts.length > 0 ? parts.join(', ') : 'no structural changes';
 
-        const summary =
-          parts.length > 0
-            ? `I've updated the diagram: ${parts.join(', ')}.`
+        // AI summary (contextual) or fallback to template
+        const aiSummary = state.lastPatchSummary;
+        const summary = aiSummary
+          ? `${aiSummary}\n\n_${microDelta}_`
+          : parts.length > 0
+            ? `I've updated the diagram: ${microDelta}.`
             : 'No changes were made to the diagram.';
 
         return {

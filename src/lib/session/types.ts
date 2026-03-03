@@ -2,6 +2,20 @@
  * Session types for Story 6.7 — BMAD Session Isolation (Per Workspace)
  */
 
+import type { BmadConfig } from './config-reader';
+import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
+
+/**
+ * A live-review annotation enriched with a stable ID and optional dismiss timestamp.
+ * Persisted in the session so annotations survive across renders and page reloads.
+ */
+export interface LiveReviewItem extends Annotation {
+  /** Stable unique ID for dismiss/send-to-chat tracking. */
+  id: string;
+  /** ISO timestamp when the user dismissed this item (undefined = still active). */
+  dismissedAt?: string;
+}
+
 /**
  * Context loaded from a workspace's BMAD memory files.
  * Passed to AI team nodes so they retain project context across sessions.
@@ -16,6 +30,8 @@ export interface SessionContext {
   decisions: string;
   /** Whether this is a brand-new session (no prior BMAD files existed). */
   isNew: boolean;
+  /** Parsed BMAD core config (communication_language, document_output_language, etc.). */
+  bmadConfig: BmadConfig;
 }
 
 /**
@@ -34,6 +50,10 @@ export interface SessionArtifacts {
   updatedMemory?: string;
   /** Updated decisions log to write back to _bmad/memory/decisions.md. */
   updatedDecisions?: string;
+  /** Live review items persisted for the todo-list panel. */
+  liveReviewItems?: LiveReviewItem[];
+  /** Studio ID to scope live review items to a specific studio. */
+  studioId?: string;
   /** Arbitrary state blob to persist in the WorkspaceSession DB record. */
   state?: Record<string, unknown>;
 }

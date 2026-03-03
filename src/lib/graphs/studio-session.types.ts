@@ -28,6 +28,8 @@ export interface StudioSessionState {
   followUpQuestion?: string;
   /** Latest diagram patch from refine node. */
   lastPatch?: DiagramPatch;
+  /** AI-generated contextual summary of the last patch (from refine LLM). */
+  lastPatchSummary?: string;
   /** Full history of patches applied in this session (for undo/debug). */
   patchHistory: DiagramPatch[];
   /** Persisted diagram ID, set by persist node. */
@@ -94,6 +96,8 @@ export type StudioInteractResponse =
       checkpoint: unknown;
       patch?: DiagramPatch;
       patchAnimation?: PatchAnimationEvent;
+      /** AI-generated summary of changes + micro-delta. */
+      summary?: string;
       studioId?: string;
     }
   | { type: 'complete'; diagramId: string; studioId?: string }
