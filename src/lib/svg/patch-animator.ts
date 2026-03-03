@@ -27,8 +27,8 @@ const KEYFRAMES_MARKER = 'data-pg-keyframes';
 
 const KEYFRAMES_CSS = `
 @keyframes pgFadeIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 @keyframes pgFadeOut {
   from { opacity: 1; }
@@ -186,8 +186,8 @@ export function animateAddedEdges(svgRoot: SVGElement, edgeIds: EdgeId[]): void 
 // ── Initial render stagger ────────────────────────────────────────────────────
 
 /**
- * Applies a staggered fade-in to all nodes on the first render.
- * Each node delays by `index × 50ms`.
+ * Applies a staggered fade-in to all nodes and edges on the first render.
+ * Nodes stagger by `index × 50ms`, edges follow after all nodes with the same stagger.
  */
 export function animateInitialRender(svgRoot: SVGElement): void {
   injectKeyframes(svgRoot);
@@ -195,5 +195,12 @@ export function animateInitialRender(svgRoot: SVGElement): void {
   nodeEls.forEach((el, i) => {
     el.style.opacity = '0';
     el.style.animation = `pgFadeIn 300ms ease-out ${i * 50}ms both`;
+  });
+
+  const edgeBaseDelay = nodeEls.length * 50;
+  const edgeEls = svgRoot.querySelectorAll<SVGGElement>('g.edgePath');
+  edgeEls.forEach((el, i) => {
+    el.style.opacity = '0';
+    el.style.animation = `pgFadeIn 300ms ease-out ${edgeBaseDelay + i * 300}ms both`;
   });
 }

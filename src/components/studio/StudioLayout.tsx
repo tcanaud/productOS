@@ -15,6 +15,7 @@ import type {
   DiagramUpdatePayload,
   InteractionPayload,
 } from '@/lib/sse/sse.types';
+import { json2mermaid } from '@/lib/json2mermaid';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
@@ -194,6 +195,19 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
       if (liveReviewTimerRef.current) clearTimeout(liveReviewTimerRef.current);
     };
   }, [diagramContent, workspaceId]);
+
+  // Story 7.4: handle graph update from AI node actions (expand / simplify)
+  const handleGraphUpdate = useCallback((updatedGraph: JsonGraph) => {
+    currentGraphRef.current = updatedGraph;
+    try {
+      const mermaid = json2mermaid(updatedGraph);
+      setDiagramContent(mermaid);
+      // Clear stale annotations since the graph structure changed
+      setAnnotations([]);
+    } catch {
+      // If conversion fails, keep the existing diagram content unchanged
+    }
+  }, []);
 
   // Handle InteractionWidget response — resume graph with user's answer
   const handleRespond = useCallback(
@@ -418,6 +432,8 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
           patchAnimation={patchAnimation}
           graph={currentGraphRef.current ?? undefined}
           annotations={annotations}
+          onGraphUpdate={handleGraphUpdate}
+          workspaceId={workspaceId}
         />
       </div>
     </div>

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * DiagramContextMenu — Story 7.1
+ * DiagramContextMenu — Story 7.1 / Story 7.4
  *
  * Floating context menu anchored to the click position on a diagram node or edge.
  * Closes on Escape key or outside click (via a full-screen backdrop).
@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
 /** All possible diagram interactions dispatched from the context menu. */
 export type DiagramAction =
@@ -19,7 +20,12 @@ export type DiagramAction =
   | { type: 'explain-node'; nodeId: string }
   | { type: 'add-condition'; from: string; to: string }
   | { type: 'remove-connection'; from: string; to: string }
-  | { type: 'reverse-direction'; from: string; to: string };
+  | { type: 'reverse-direction'; from: string; to: string }
+  // Story 7.4 — AI-powered node actions
+  | { type: 'expand-node'; nodeId: string }
+  | { type: 'ask-node'; nodeId: string }
+  | { type: 'simplify-node'; nodeId: string }
+  | { type: 'view-review'; nodeId: string };
 
 type NodeMenuProps = {
   type: 'node';
@@ -27,6 +33,8 @@ type NodeMenuProps = {
   position: { x: number; y: number };
   onAction: (action: DiagramAction) => void;
   onClose: () => void;
+  /** Review annotations — used to show/hide the "View review details" item. */
+  annotations?: Annotation[];
 };
 
 type EdgeMenuProps = {
@@ -39,6 +47,11 @@ type EdgeMenuProps = {
 };
 
 export type DiagramContextMenuProps = NodeMenuProps | EdgeMenuProps;
+
+/** Separator between menu sections. */
+function MenuSeparator() {
+  return <div className="my-1 border-t" />;
+}
 
 /** Individual menu item button. */
 function MenuItem({
@@ -102,6 +115,25 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
       >
         {props.type === 'node' && (
           <div className="flex flex-col py-1">
+            {/* Story 7.4 — AI-powered actions */}
+            <MenuItem
+              label="Expand into sub-flow"
+              onClick={() => handleAction({ type: 'expand-node', nodeId: props.nodeId })}
+            />
+            <MenuItem
+              label="Simplify"
+              onClick={() => handleAction({ type: 'simplify-node', nodeId: props.nodeId })}
+            />
+            <MenuItem
+              label="Ask a question about this node"
+              onClick={() => handleAction({ type: 'ask-node', nodeId: props.nodeId })}
+            />
+            <MenuItem
+              label="View review details"
+              onClick={() => handleAction({ type: 'view-review', nodeId: props.nodeId })}
+            />
+            <MenuSeparator />
+            {/* Story 7.1 — structural actions */}
             <MenuItem
               label="Explain node"
               onClick={() => handleAction({ type: 'explain-node', nodeId: props.nodeId })}
@@ -118,7 +150,7 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
               label="Add parent node"
               onClick={() => handleAction({ type: 'add-parent', nodeId: props.nodeId })}
             />
-            <div className="my-1 border-t" />
+            <MenuSeparator />
             <MenuItem
               label="Remove node"
               destructive

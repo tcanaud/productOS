@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 import { MermaidPreview } from '@/components/diagram/MermaidPreview';
 import type { ClickPosition } from '@/components/diagram/MermaidPreview';
 import { DiagramContextMenu } from '@/components/diagram/DiagramContextMenu';
 import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
 import { ReviewBadgeDetail } from '@/components/diagram/ReviewBadgeDetail';
+import { NodeChatModal } from '@/components/diagram/NodeChatModal';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
@@ -14,6 +17,11 @@ type ContextMenuState =
   | { type: 'node'; nodeId: string; position: ClickPosition }
   | { type: 'edge'; edgeFrom: string; edgeTo: string; position: ClickPosition }
   | null;
+
+type ChatState = {
+  nodeId: string;
+  nodeLabel: string;
+} | null;
 
 export type DiagramPreviewPanelProps = {
   diagramContent?: string;
@@ -25,6 +33,10 @@ export type DiagramPreviewPanelProps = {
   annotations?: Annotation[];
   /** Called when the user selects an action from the context menu. */
   onDiagramAction?: (action: DiagramAction) => void;
+  /** Called when an AI node action produces an updated graph (expand / simplify). */
+  onGraphUpdate?: (updatedGraph: JsonGraph) => void;
+  /** Workspace ID — required for AI node actions. */
+  workspaceId?: string;
 };
 
 export function DiagramPreviewPanel({
@@ -34,11 +46,15 @@ export function DiagramPreviewPanel({
   graph,
   annotations,
   onDiagramAction,
+  onGraphUpdate,
+  workspaceId,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
+  const [chatState, setChatState] = useState<ChatState>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleNodeClick = useCallback((nodeId: string, pos: ClickPosition) => {
     setContextMenu({ type: 'node', nodeId, position: pos });
@@ -52,10 +68,71 @@ export function DiagramPreviewPanel({
   );
 
   const handleAction = useCallback(
-    (action: DiagramAction) => {
-      onDiagramAction?.(action);
+    async (action: DiagramAction) => {
+      // Delegate non-AI actions to the parent immediately
+      if (
+        action.type !== 'expand-node' &&
+        action.type !== 'simplify-node' &&
+        action.type !== 'ask-node' &&
+        action.type !== 'view-review'
+      ) {
+        onDiagramAction?.(action);
+        return;
+      }
+
+      // Story 7.4 — AI-powered actions
+      if (action.type === 'ask-node') {
+        const nodeLabel = graph?.nodes.find((n) => n.id === action.nodeId)?.label ?? action.nodeId;
+        setChatState({ nodeId: action.nodeId, nodeLabel });
+        return;
+      }
+
+      if (action.type === 'view-review') {
+        const annotation = annotations?.find((a) => a.nodeId === action.nodeId) ?? null;
+        if (annotation) {
+          setSelectedAnnotation(annotation);
+        } else {
+          toast.info('No review details available for this node');
+        }
+        return;
+      }
+
+      // expand-node / simplify-node — call AI API
+      if (!graph || !workspaceId) {
+        toast.error('Graph or workspace not available');
+        return;
+      }
+
+      const endpoint =
+        action.type === 'expand-node' ? '/api/ai/node/expand' : '/api/ai/node/simplify';
+
+      setIsProcessing(true);
+      const originalGraph = graph;
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId, graph, nodeId: action.nodeId }),
+        });
+
+        if (!res.ok) {
+          const errData = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errData.error ?? `Server error ${res.status}`);
+        }
+
+        const data = (await res.json()) as { graph: JsonGraph };
+        onGraphUpdate?.(data.graph);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Something went wrong';
+        toast.error(`Action failed: ${msg}`);
+        // Restore original graph on error
+        onGraphUpdate?.(originalGraph);
+      } finally {
+        setIsProcessing(false);
+      }
     },
-    [onDiagramAction]
+    [onDiagramAction, onGraphUpdate, graph, annotations, workspaceId]
   );
 
   const closeMenu = useCallback(() => setContextMenu(null), []);
@@ -65,6 +142,7 @@ export function DiagramPreviewPanel({
   }, []);
 
   const closeDetail = useCallback(() => setSelectedAnnotation(null), []);
+  const closeChat = useCallback(() => setChatState(null), []);
 
   // Apply patch animation classes to the diagram container when a patch is applied
   useEffect(() => {
@@ -121,7 +199,7 @@ export function DiagramPreviewPanel({
       {hasContent && !isStreaming && (
         <div
           ref={containerRef}
-          className="h-full w-full rounded-lg border border-border overflow-hidden transition-opacity duration-300"
+          className="relative h-full w-full rounded-lg border border-border overflow-hidden transition-opacity duration-300"
           style={{ opacity: 1 }}
         >
           <MermaidPreview
@@ -132,6 +210,20 @@ export function DiagramPreviewPanel({
             onEdgeClick={handleEdgeClick}
             onBadgeClick={handleBadgeClick}
           />
+
+          {/* AI processing spinner overlay */}
+          {isProcessing && (
+            <div
+              className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/60 backdrop-blur-sm"
+              aria-label="Processing…"
+              aria-busy="true"
+            >
+              <div className="flex items-center gap-2 rounded-full bg-background px-4 py-2 shadow-md">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-sm text-foreground">AI is processing…</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -143,6 +235,7 @@ export function DiagramPreviewPanel({
           position={contextMenu.position}
           onAction={handleAction}
           onClose={closeMenu}
+          annotations={annotations}
         />
       )}
       {contextMenu?.type === 'edge' && (
@@ -156,9 +249,19 @@ export function DiagramPreviewPanel({
         />
       )}
 
-      {/* Review badge detail panel — rendered when a badge is clicked */}
+      {/* Review badge detail panel — rendered when a badge is clicked or "View review details" is selected */}
       {selectedAnnotation && (
         <ReviewBadgeDetail annotation={selectedAnnotation} onClose={closeDetail} />
+      )}
+
+      {/* Node chat modal — opened by "Ask a question about this node" */}
+      {chatState && workspaceId && (
+        <NodeChatModal
+          nodeId={chatState.nodeId}
+          nodeLabel={chatState.nodeLabel}
+          workspaceId={workspaceId}
+          onClose={closeChat}
+        />
       )}
     </div>
   );
