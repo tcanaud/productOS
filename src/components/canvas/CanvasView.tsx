@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useCanvasViewport } from '@/hooks/useCanvasViewport';
 import { ArtifactCard } from './ArtifactCard';
-import type { CanvasArtifact, CanvasState } from '@/lib/canvas/types';
+import { ConnectionLayer } from './ConnectionLayer';
+import type { CanvasArtifact, CanvasConnection, CanvasState } from '@/lib/canvas/types';
 
 interface CanvasViewProps {
   workspaceId: string;
@@ -94,6 +95,7 @@ export function CanvasView({ workspaceId }: CanvasViewProps) {
   }
 
   const artifacts: CanvasArtifact[] = canvasState?.artifacts ?? [];
+  const connections: CanvasConnection[] = canvasState?.connections ?? [];
 
   return (
     <div
@@ -124,6 +126,8 @@ export function CanvasView({ workspaceId }: CanvasViewProps) {
           height: 0,
         }}
       >
+        {/* Connection lines rendered below artifact cards */}
+        <ConnectionLayer connections={connections} artifacts={artifacts} zoom={zoom} />
         {artifacts.map((artifact) => (
           <ArtifactCard
             key={artifact.id}

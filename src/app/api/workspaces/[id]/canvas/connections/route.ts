@@ -60,6 +60,20 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Target artifact not found' }, { status: 404 });
   }
 
+  // Deduplicate: return existing connection if (sourceId, targetId) pair already exists
+  const existing = await prisma.canvasConnection.findFirst({
+    where: { sourceId, targetId },
+  });
+  if (existing) {
+    const connection: CanvasConnection = {
+      id: existing.id,
+      sourceId: existing.sourceId,
+      targetId: existing.targetId,
+      label: existing.label,
+    };
+    return NextResponse.json(connection, { status: 200 });
+  }
+
   const row = await prisma.canvasConnection.create({
     data: { sourceId, targetId, label: label ?? null },
   });
