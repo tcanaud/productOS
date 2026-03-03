@@ -12,7 +12,7 @@ else
 fi
 
 echo "Waiting for postgres..."
-until nc -z postgres 5432 2>/dev/null; do
+until pg_isready -h postgres -p 5432 2>/dev/null; do
   sleep 1
 done
 echo "Postgres is ready."
