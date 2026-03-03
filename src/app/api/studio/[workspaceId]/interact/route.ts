@@ -4,15 +4,16 @@
  * Drives the studio-session claudegraph one turn at a time.
  *
  * Request body:
- *   { userMessage: string; checkpoint?: RunCheckpoint; sessionId?: string }
+ *   { userMessage: string; checkpoint?: RunCheckpoint; sessionId?: string;
+ *     studioId?: string; messages?: unknown[] }
  *
  * On first call: pass only userMessage (no checkpoint) → starts a new session.
  * On subsequent calls: pass userMessage + checkpoint from previous response.
  *
  * Response:
- *   { type: 'question'; content: string; runId: string; checkpoint: RunCheckpoint }
- *   { type: 'diagram'; mermaid: string; runId: string; checkpoint: RunCheckpoint; patch?: DiagramPatch; patchAnimation?: PatchAnimationEvent }
- *   { type: 'complete'; diagramId: string }
+ *   { type: 'question'; ...; studioId: string }
+ *   { type: 'diagram'; ...; studioId: string }
+ *   { type: 'complete'; diagramId: string; studioId: string }
  *   { type: 'error'; message: string }
  */
 import { NextResponse } from 'next/server';
@@ -23,6 +24,7 @@ import { startStudioSession, resumeStudioSession } from '@/lib/graphs/studio-ses
 import type { RunCheckpoint } from '@/lib/graphs/studio-session.runner';
 import type { StudioSessionState, PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import { sessionManager } from '@/lib/session/session-manager';
+import { studioPersistence } from '@/lib/studio/studio-persistence';
 
 /** Derive a PatchAnimationEvent from the last applied patch for frontend animation. */
 function derivePatchAnimation(state: StudioSessionState): PatchAnimationEvent | undefined {
@@ -58,14 +60,20 @@ export async function POST(
 
   const { workspaceId } = await params;
 
-  let body: { userMessage?: string; checkpoint?: RunCheckpoint; sessionId?: string };
+  let body: {
+    userMessage?: string;
+    checkpoint?: RunCheckpoint;
+    sessionId?: string;
+    studioId?: string;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ type: 'error', message: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { userMessage, checkpoint, sessionId } = body;
+  const { userMessage, sessionId } = body;
+  let { checkpoint, studioId } = body;
 
   if (!userMessage || typeof userMessage !== 'string' || userMessage.trim().length === 0) {
     return NextResponse.json(
@@ -75,6 +83,20 @@ export async function POST(
   }
 
   try {
+    // If studioId provided but no checkpoint, load checkpoint from DB
+    if (studioId && !checkpoint) {
+      const stored = await studioPersistence.load(studioId);
+      if (stored?.checkpoint) {
+        checkpoint = stored.checkpoint;
+      }
+    }
+
+    // If no studioId and no checkpoint (first message), create a new studio
+    if (!studioId && !checkpoint) {
+      const autoTitle = userMessage.trim().slice(0, 50) + (userMessage.trim().length > 50 ? '…' : '');
+      studioId = await studioPersistence.create(workspaceId, autoTitle);
+    }
+
     let outcome: Awaited<ReturnType<typeof startStudioSession>>;
 
     if (checkpoint) {
@@ -93,6 +115,16 @@ export async function POST(
     }
 
     const finalState = outcome.state as StudioSessionState;
+
+    // Auto-save graph state + checkpoint to DB after every outcome
+    // (messageHistory is saved separately by the client via PATCH)
+    if (studioId) {
+      await studioPersistence.saveTurn(studioId, {
+        graphState: finalState,
+        checkpoint: outcome.status === 'paused' ? outcome.checkpoint : null,
+        sseSessionId: sessionId,
+      });
+    }
 
     if (outcome.status === 'ended') {
       // Graph ran to END — diagram confirmed and ready to persist
@@ -114,6 +146,54 @@ export async function POST(
         },
       });
 
+      // Auto-sync: create or update CanvasArtifact for this diagram
+      const existingArtifact = await prisma.canvasArtifact.findFirst({
+        where: { workspaceId, type: 'diagram', refId: diagram.id },
+      });
+
+      if (existingArtifact) {
+        await prisma.canvasArtifact.update({
+          where: { id: existingArtifact.id },
+          data: { title: finalState.currentDiagram.title ?? 'Studio Diagram' },
+        });
+      } else {
+        const unlinked = await prisma.canvasArtifact.findFirst({
+          where: { workspaceId, type: 'diagram', refId: null },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (unlinked) {
+          await prisma.canvasArtifact.update({
+            where: { id: unlinked.id },
+            data: {
+              refId: diagram.id,
+              title: finalState.currentDiagram.title ?? 'Studio Diagram',
+            },
+          });
+        } else {
+          const last = await prisma.canvasArtifact.findFirst({
+            where: { workspaceId },
+            orderBy: { y: 'desc' },
+            select: { y: true, height: true },
+          });
+          const newY = last ? last.y + last.height + 40 : 40;
+
+          await prisma.canvasArtifact.create({
+            data: {
+              workspaceId,
+              type: 'diagram',
+              refId: diagram.id,
+              title: finalState.currentDiagram.title ?? 'Studio Diagram',
+              x: 560,
+              y: newY,
+              width: 720,
+              height: 640,
+              zIndex: 0,
+            },
+          });
+        }
+      }
+
       // Story 6.7: persist artifacts to BMAD session filesystem
       await sessionManager.persistArtifacts(workspaceId, {
         diagramJson: JSON.stringify(finalState.currentDiagram),
@@ -122,7 +202,12 @@ export async function POST(
         state: { lastDiagramId: diagram.id },
       });
 
-      return NextResponse.json({ type: 'complete', diagramId: diagram.id });
+      // Mark studio as completed
+      if (studioId) {
+        await studioPersistence.complete(studioId, diagram.id);
+      }
+
+      return NextResponse.json({ type: 'complete', diagramId: diagram.id, studioId });
     }
 
     if (outcome.status === 'paused') {
@@ -143,6 +228,7 @@ export async function POST(
           checkpoint: serializedCheckpoint,
           ...(finalState.lastPatch ? { patch: finalState.lastPatch } : {}),
           ...(patchAnimation ? { patchAnimation } : {}),
+          studioId,
         });
       }
 
@@ -152,6 +238,9 @@ export async function POST(
         finalState.partyModeEnabled && finalState.personaMessages.length > 0
           ? { personas: finalState.personaMessages }
           : {};
+      const roundtablePayload = finalState.roundtable
+        ? { roundtable: finalState.roundtable }
+        : {};
 
       return NextResponse.json({
         type: 'question',
@@ -159,6 +248,8 @@ export async function POST(
         runId: outcome.runId,
         checkpoint: serializedCheckpoint,
         ...personasPayload,
+        ...roundtablePayload,
+        studioId,
       });
     }
 

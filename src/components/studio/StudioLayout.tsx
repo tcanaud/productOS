@@ -11,6 +11,7 @@ import { applyPatch } from '@/lib/graphs/patch-applier';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import type {
   PersonaMessagePayload,
+  RoundtablePayload,
   DiagramFullPayload,
   DiagramUpdatePayload,
   InteractionPayload,
@@ -25,6 +26,13 @@ export type PersonaBubble = {
   icon: string;
   color: string;
   content: string;
+  emotion?: string;
+  replyTo?: string;
+};
+
+export type RoundtableData = {
+  questions: string[];
+  suggestions: string[];
 };
 
 export type Message = {
@@ -34,13 +42,16 @@ export type Message = {
   timestamp: Date;
   /** Party-mode: when present, render as staggered PersonaMessageBubble list instead of plain bubble. */
   personas?: PersonaBubble[];
+  /** Roundtable block: synthesized questions + clickable suggestions shown after persona messages. */
+  roundtable?: RoundtableData;
 };
 
 interface StudioLayoutProps {
   workspaceId: string;
+  studioId?: string; // undefined = new studio
 }
 
-export function StudioLayout({ workspaceId }: StudioLayoutProps) {
+export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +62,11 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
     undefined
   );
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Current studio ID — starts from prop, set on first message if new
+  const [currentStudioId, setCurrentStudioId] = useState<string | null>(studioId ?? null);
+  // Track whether initial load from DB is done
+  const [isHydrated, setIsHydrated] = useState(!studioId);
 
   // Checkpoint from the graph runner — maintained across turns
   const checkpointRef = useRef<unknown>(null);
@@ -68,7 +84,65 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
   const processedEventIdsRef = useRef<Set<string>>(new Set());
 
   // Story 6.6: SSE stream hook — subscribes when sessionId is set
-  const { events, connectionState } = useStudioStream(sessionId);
+  const { events, connectionState, waitForOpen } = useStudioStream(sessionId);
+
+  // Hydrate from DB when opening an existing studio
+  useEffect(() => {
+    if (!studioId) return;
+
+    let cancelled = false;
+    async function hydrate() {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/studios/${studioId}`);
+        if (!res.ok) {
+          toast.error('Failed to load studio');
+          return;
+        }
+        const data = await res.json();
+
+        if (cancelled) return;
+
+        // Restore messages
+        if (data.messageHistory && Array.isArray(data.messageHistory)) {
+          const restored: Message[] = data.messageHistory.map((m: Record<string, unknown>) => ({
+            ...m,
+            timestamp: new Date(m.timestamp as string),
+          }));
+          setMessages(restored);
+        }
+
+        // Restore checkpoint
+        if (data.checkpoint) {
+          checkpointRef.current = data.checkpoint;
+        }
+
+        // Restore diagram from graphState
+        if (data.graphState?.currentDiagram) {
+          currentGraphRef.current = data.graphState.currentDiagram as JsonGraph;
+          try {
+            const mermaid = json2mermaid(data.graphState.currentDiagram as JsonGraph);
+            setDiagramContent(mermaid);
+          } catch {
+            // Conversion failed, skip
+          }
+        }
+
+        // Restore SSE session ID (or generate new)
+        if (data.sseSessionId) {
+          setSessionId(data.sseSessionId);
+        }
+      } catch {
+        toast.error('Failed to load studio');
+      } finally {
+        if (!cancelled) setIsHydrated(true);
+      }
+    }
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [studioId, workspaceId]);
 
   // Process incoming SSE events in arrival order
   useEffect(() => {
@@ -78,25 +152,22 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
 
       if (event.type === 'persona-message') {
         const payload = event.data as PersonaMessagePayload;
+        const bubble: PersonaBubble = {
+          personaId: payload.persona,
+          displayName: payload.displayName,
+          icon: payload.icon,
+          color: '#6B7280',
+          content: payload.message,
+          ...(payload.emotion ? { emotion: payload.emotion } : {}),
+          ...(payload.replyTo ? { replyTo: payload.replyTo } : {}),
+        };
         setMessages((prev) => {
           const lastMsg = prev[prev.length - 1];
           // Append to an existing persona-group assistant message if it's the last one
           if (lastMsg?.role === 'assistant' && lastMsg.personas) {
             return prev.map((m, i) =>
               i === prev.length - 1
-                ? {
-                    ...m,
-                    personas: [
-                      ...(m.personas ?? []),
-                      {
-                        personaId: payload.persona,
-                        displayName: payload.displayName,
-                        icon: payload.icon,
-                        color: '#6B7280',
-                        content: payload.message,
-                      },
-                    ],
-                  }
+                ? { ...m, personas: [...(m.personas ?? []), bubble] }
                 : m
             );
           }
@@ -107,19 +178,25 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
               role: 'assistant' as const,
               content: '',
               timestamp: new Date(event.timestamp),
-              personas: [
-                {
-                  personaId: payload.persona,
-                  displayName: payload.displayName,
-                  icon: payload.icon,
-                  color: '#6B7280',
-                  content: payload.message,
-                },
-              ],
+              personas: [bubble],
             },
           ];
         });
         setIsLoading(false);
+      } else if (event.type === 'roundtable') {
+        const payload = event.data as RoundtablePayload;
+        // Attach roundtable to the last assistant message (which has personas)
+        setMessages((prev) => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg?.role === 'assistant') {
+            return prev.map((m, i) =>
+              i === prev.length - 1
+                ? { ...m, roundtable: { questions: payload.questions, suggestions: payload.suggestions } }
+                : m
+            );
+          }
+          return prev;
+        });
       } else if (event.type === 'interaction') {
         setInteractionPayload(event.data as InteractionPayload);
         setIsLoading(false);
@@ -209,6 +286,34 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
     }
   }, []);
 
+  // Helper to get current messages for persistence (uses a ref to avoid stale closures)
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
+  const currentStudioIdRef = useRef<string | null>(currentStudioId);
+  currentStudioIdRef.current = currentStudioId;
+
+  // Debounced background save of messageHistory whenever messages change
+  const messageSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const sid = currentStudioIdRef.current;
+    if (!sid || messages.length === 0) return;
+
+    if (messageSaveTimerRef.current) clearTimeout(messageSaveTimerRef.current);
+    messageSaveTimerRef.current = setTimeout(() => {
+      fetch(`/api/workspaces/${workspaceId}/studios/${sid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageHistory: messages }),
+      }).catch(() => {
+        // Best-effort save, don't block the UI
+      });
+    }, 1500);
+
+    return () => {
+      if (messageSaveTimerRef.current) clearTimeout(messageSaveTimerRef.current);
+    };
+  }, [messages, workspaceId]);
+
   // Handle InteractionWidget response — resume graph with user's answer
   const handleRespond = useCallback(
     async (answer: string) => {
@@ -223,11 +328,17 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
       };
       setMessages((prev) => [...prev, userMessage]);
 
-      const body: { userMessage: string; checkpoint?: unknown; sessionId?: string } = {
+      const body: {
+        userMessage: string;
+        checkpoint?: unknown;
+        sessionId?: string;
+        studioId?: string;
+      } = {
         userMessage: answer,
       };
       if (checkpointRef.current) body.checkpoint = checkpointRef.current;
       if (sessionId) body.sessionId = sessionId;
+      if (currentStudioId) body.studioId = currentStudioId;
 
       try {
         const res = await fetch(`/api/studio/${workspaceId}/interact`, {
@@ -238,14 +349,15 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
         if (!res.ok) throw new Error(`Server error ${res.status}`);
 
         const data = (await res.json()) as
-          | { type: 'question'; content: string; checkpoint: unknown; personas?: PersonaBubble[] }
+          | { type: 'question'; content: string; checkpoint: unknown; studioId?: string; personas?: PersonaBubble[]; roundtable?: RoundtableData }
           | {
               type: 'diagram';
               mermaid: string;
               checkpoint: unknown;
               patchAnimation?: PatchAnimationEvent;
+              studioId?: string;
             }
-          | { type: 'complete'; diagramId: string }
+          | { type: 'complete'; diagramId: string; studioId?: string }
           | { type: 'error'; message: string };
 
         if (data.type === 'question') {
@@ -275,7 +387,7 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
         setIsLoading(false);
       }
     },
-    [workspaceId, sessionId]
+    [workspaceId, sessionId, currentStudioId]
   );
 
   async function handleSend(text: string) {
@@ -293,16 +405,30 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
     setIsLoading(true);
 
     // Assign a session ID for SSE routing (persists across turns)
+    const isFirstMessage = !sessionId;
     const currentSessionId = sessionId ?? crypto.randomUUID();
-    if (!sessionId) setSessionId(currentSessionId);
+    if (isFirstMessage) {
+      setSessionId(currentSessionId);
+      // Wait for the SSE EventSource to connect before sending the POST,
+      // otherwise server-emitted events would be lost (race condition).
+      await waitForOpen();
+    }
 
     try {
-      const body: { userMessage: string; checkpoint?: unknown; sessionId?: string } = {
+      const body: {
+        userMessage: string;
+        checkpoint?: unknown;
+        sessionId?: string;
+        studioId?: string;
+      } = {
         userMessage: text.trim(),
         sessionId: currentSessionId,
       };
       if (checkpointRef.current) {
         body.checkpoint = checkpointRef.current;
+      }
+      if (currentStudioId) {
+        body.studioId = currentStudioId;
       }
 
       const res = await fetch(`/api/studio/${workspaceId}/interact`, {
@@ -321,57 +447,80 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
             content: string;
             checkpoint: unknown;
             personas?: PersonaBubble[];
+            roundtable?: RoundtableData;
+            studioId?: string;
           }
         | {
             type: 'diagram';
             mermaid: string;
             checkpoint: unknown;
             patchAnimation?: PatchAnimationEvent;
+            studioId?: string;
           }
-        | { type: 'complete'; diagramId: string }
+        | { type: 'complete'; diagramId: string; studioId?: string }
         | { type: 'error'; message: string };
+
+      // Capture studioId from server response (created on first message)
+      // Use window.history.replaceState to update URL without triggering a Next.js navigation
+      // (router.replace would remount the component and lose all in-memory state)
+      if ('studioId' in data && data.studioId && !currentStudioId) {
+        setCurrentStudioId(data.studioId);
+        window.history.replaceState(null, '', `/workspaces/${workspaceId}/studio/${data.studioId}`);
+      }
 
       if (data.type === 'question') {
         // Store checkpoint for next turn
         checkpointRef.current = data.checkpoint;
 
-        const aiMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: data.content,
-          timestamp: new Date(),
-          // Party-mode: include parsed persona bubbles if present
-          personas: data.personas,
-        };
-        setMessages((prev) => [...prev, aiMessage]);
+        // When SSE is active AND the response has personas, SSE events already
+        // handle rendering persona bubbles + roundtable — skip to avoid duplicates.
+        // Non-persona question responses (plain text) still need to be added here
+        // because the SSE 'interaction' event only sets interactionPayload, not a message.
+        const hasPersonas = data.personas && data.personas.length > 0;
+        if (!(currentSessionId && hasPersonas)) {
+          const aiMessage: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: data.content,
+            timestamp: new Date(),
+            personas: data.personas,
+            roundtable: data.roundtable,
+          };
+          setMessages((prev) => [...prev, aiMessage]);
+        }
         setIsLoading(false);
       } else if (data.type === 'diagram') {
         // Store checkpoint for potential refinement turns
         checkpointRef.current = data.checkpoint;
 
-        // Trigger progressive reveal: shimmer first, then diagram
-        setIsStreaming(true);
-        setIsLoading(false);
+        // When SSE is active, diagram-full / diagram-update events handle rendering.
+        if (!currentSessionId) {
+          setIsStreaming(true);
+          setIsLoading(false);
 
-        setTimeout(() => {
-          setDiagramContent(data.mermaid);
-          setIsStreaming(false);
+          setTimeout(() => {
+            setDiagramContent(data.mermaid);
+            setIsStreaming(false);
 
-          // Story 6.5: apply patch animation if present, clear after 800ms
-          if (data.patchAnimation) {
-            setPatchAnimation(data.patchAnimation);
+            if (data.patchAnimation) {
+              setPatchAnimation(data.patchAnimation);
 
-            if (patchAnimationTimerRef.current) {
-              clearTimeout(patchAnimationTimerRef.current);
+              if (patchAnimationTimerRef.current) {
+                clearTimeout(patchAnimationTimerRef.current);
+              }
+              patchAnimationTimerRef.current = setTimeout(() => {
+                setPatchAnimation(undefined);
+              }, 800);
             }
-            patchAnimationTimerRef.current = setTimeout(() => {
-              setPatchAnimation(undefined);
-            }, 800);
-          }
-        }, 600);
+          }, 600);
+        } else {
+          setIsLoading(false);
+        }
       } else if (data.type === 'complete') {
         setIsLoading(false);
-        toast.success('Diagram saved');
+        if (!currentSessionId) {
+          toast.success('Diagram saved');
+        }
         checkpointRef.current = null;
       } else if (data.type === 'error') {
         throw new Error(data.message);
@@ -392,6 +541,15 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
   function handleChipSelect(chip: string) {
     setInputValue(chip);
     inputRef.current?.focus();
+  }
+
+  // Show loading spinner while hydrating from DB
+  if (!isHydrated) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+      </div>
+    );
   }
 
   return (

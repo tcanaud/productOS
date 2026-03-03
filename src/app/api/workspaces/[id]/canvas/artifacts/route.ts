@@ -6,7 +6,7 @@ import type { CanvasArtifact } from '@/lib/canvas/types';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
-const ARTIFACT_TYPES = ['diagram', 'conversation', 'review', 'spec', 'story', 'note'] as const;
+const ARTIFACT_TYPES = ['diagram', 'conversation', 'review', 'spec', 'story', 'note', 'studio'] as const;
 
 const CreateArtifactSchema = z.object({
   type: z.enum(ARTIFACT_TYPES),

@@ -32,7 +32,7 @@ import { applyPatch } from './patch-applier';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Classify user intent from raw message text. */
-export function classifyIntent(message: string): 'describe' | 'refine' | 'confirm' | 'other' {
+export function classifyIntent(message: string): 'describe' | 'refine' | 'confirm' | 'discuss' | 'other' {
   const lower = message.toLowerCase().trim();
 
   if (
@@ -46,6 +46,26 @@ export function classifyIntent(message: string): 'describe' | 'refine' | 'confir
     lower.startsWith('that looks good')
   ) {
     return 'confirm';
+  }
+
+  // Detect requests to go back to discussion / roundtable
+  const discussKeywords = [
+    'tour de table',
+    'roundtable',
+    'discutons',
+    'parlons',
+    'rediscuter',
+    'reparlons',
+    'refaisons un tour',
+    'relançons la discussion',
+    'revenons à la discussion',
+    'avis des personas',
+    'que pensent',
+    'let\'s discuss',
+    'back to discussion',
+  ];
+  if (discussKeywords.some((kw) => lower.includes(kw))) {
+    return 'discuss';
   }
 
   const refineKeywords = [
@@ -93,16 +113,17 @@ export function computeContextScore(messages: StudioSessionState['messages']): n
 
   let score = 0;
 
-  // Number of user turns (max 30 pts, 10 pts each)
-  score += Math.min(userMessages.length * 10, 30);
+  // Number of user turns (max 30 pts, 7 pts each — ~4 turns to max)
+  score += Math.min(userMessages.length * 7, 30);
 
-  // Total user text length (max 40 pts, 1 pt per 20 chars)
+  // Total user text length (max 30 pts, 1 pt per 30 chars)
   const totalLength = userMessages.reduce((s, m) => s + m.content.length, 0);
-  score += Math.min(Math.floor(totalLength / 20), 40);
+  score += Math.min(Math.floor(totalLength / 30), 30);
 
-  // Bonus if any message is a substantive description (≥30 chars — max 30 pts)
-  const hasDescription = userMessages.some((m) => m.content.length >= 30);
-  if (hasDescription) score += 30;
+  // Tiered bonus for substantive descriptions (max 30 pts)
+  if (totalLength >= 150) score += 30;
+  else if (totalLength >= 80) score += 20;
+  else if (totalLength >= 30) score += 10;
 
   return Math.min(score, 100);
 }
@@ -428,11 +449,11 @@ export function createStudioSessionGraph() {
         }
 
         const rawPartyResponse = state['multi-persona-respond']?.partyResponse ?? '';
-        const personaMessages = parsePartyModeResponse(rawPartyResponse);
+        const { personas: personaMessages, roundtable } = parsePartyModeResponse(rawPartyResponse);
 
         return {
           kind: 'continue' as const,
-          statePatch: { personaMessages },
+          statePatch: { personaMessages, ...(roundtable ? { roundtable } : {}) },
         };
       },
     })
@@ -823,7 +844,7 @@ export function createStudioSessionGraph() {
     .when((ctx) => {
       const state = ctx.state as StudioSessionState;
       // Go to enough-context if we have any diagram context or user explicitly describes
-      return state.contextScore >= 30 || state.intent === 'describe';
+      return state.contextScore >= 35 || state.intent === 'describe';
     })
     .priority(1)
     .done();
@@ -833,29 +854,37 @@ export function createStudioSessionGraph() {
     .to('parse-input')
     .when((ctx) => {
       const state = ctx.state as StudioSessionState;
-      return state.contextScore < 30 && state.intent !== 'describe';
+      return state.contextScore < 35 && state.intent !== 'describe';
     })
     .priority(0)
     .done();
 
-  // enough-context → announce-generation (Story 6.3: when context is sufficient)
+  // enough-context → announce-generation (when context is sufficient AND at least 2 rounds)
   graph
     .from('enough-context')
     .to('announce-generation')
     .when((ctx) => {
       const state = ctx.state as StudioSessionState;
-      return state.onboardingPhase === 'generate' || state.contextScore >= 60;
+      const hasEnoughRounds = state.clarificationCount >= 2;
+      return (
+        (state.onboardingPhase === 'generate' && hasEnoughRounds) ||
+        (state.contextScore >= 65 && hasEnoughRounds)
+      );
     })
     .priority(1)
     .done();
 
-  // enough-context → parse-input (loop — need more context)
+  // enough-context → parse-input (loop — need more context or more rounds)
   graph
     .from('enough-context')
     .to('parse-input')
     .when((ctx) => {
       const state = ctx.state as StudioSessionState;
-      return state.onboardingPhase !== 'generate' && state.contextScore < 60;
+      const hasEnoughRounds = state.clarificationCount >= 2;
+      return (
+        (state.onboardingPhase !== 'generate' || !hasEnoughRounds) &&
+        (state.contextScore < 65 || !hasEnoughRounds)
+      );
     })
     .priority(0)
     .done();
@@ -871,6 +900,17 @@ export function createStudioSessionGraph() {
 
   // present-diagram-to-user → route-diagram
   graph.from('present-diagram-to-user').to('route-diagram').done();
+
+  // route-diagram → parse-input (when user wants to go back to discussion)
+  graph
+    .from('route-diagram')
+    .to('parse-input')
+    .when((ctx) => {
+      const intent = (ctx.state as StudioSessionState).intent;
+      return intent === 'discuss' || intent === 'describe';
+    })
+    .priority(3)
+    .done();
 
   // route-diagram → refine (when intent is refine)
   graph
@@ -894,7 +934,7 @@ export function createStudioSessionGraph() {
     .to('present-diagram-to-user')
     .when((ctx) => {
       const intent = (ctx.state as StudioSessionState).intent;
-      return intent !== 'refine' && intent !== 'confirm';
+      return intent !== 'refine' && intent !== 'confirm' && intent !== 'discuss' && intent !== 'describe';
     })
     .priority(0)
     .done();

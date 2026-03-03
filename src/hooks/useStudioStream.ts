@@ -12,7 +12,7 @@
  * - Bounded event queue (max 200 events)
  * - Connection state tracking: 'connecting' | 'open' | 'reconnecting' | 'failed'
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SSEEvent, SSEEventType, SSEEventMap } from '@/lib/sse/sse.types';
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'failed';
@@ -25,6 +25,8 @@ export interface UseStudioStreamResult {
   events: SSEEvent[];
   connectionState: ConnectionState;
   lastEventId: string | null;
+  /** Resolves when the SSE connection reaches 'open' state. If already open, resolves immediately. */
+  waitForOpen: () => Promise<void>;
 }
 
 export function useStudioStream(sessionId: string | null): UseStudioStreamResult {
@@ -38,6 +40,8 @@ export function useStudioStream(sessionId: string | null): UseStudioStreamResult
   // Store the connection function in a ref so it can call itself without
   // creating a circular dependency between useCallback and useEffect.
   const connectRef = useRef<() => void>(() => undefined);
+  // Pending resolvers for waitForOpen() — flushed when EventSource reaches 'open'
+  const openResolversRef = useRef<Array<() => void>>([]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -53,6 +57,9 @@ export function useStudioStream(sessionId: string | null): UseStudioStreamResult
       es.onopen = () => {
         reconnectAttemptsRef.current = 0;
         setConnectionState('open');
+        // Flush any pending waitForOpen() promises
+        for (const resolve of openResolversRef.current) resolve();
+        openResolversRef.current = [];
       };
 
       // Handle each SSE event type
@@ -85,6 +92,7 @@ export function useStudioStream(sessionId: string | null): UseStudioStreamResult
 
       const EVENT_TYPES: SSEEventType[] = [
         'persona-message',
+        'roundtable',
         'interaction',
         'diagram-update',
         'diagram-full',
@@ -133,9 +141,20 @@ export function useStudioStream(sessionId: string | null): UseStudioStreamResult
     };
   }, [sessionId]);
 
+  const waitForOpen = useCallback((): Promise<void> => {
+    // Already connected — resolve immediately
+    if (esRef.current?.readyState === EventSource.OPEN) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      openResolversRef.current.push(resolve);
+    });
+  }, []);
+
   return {
     events,
     connectionState,
     lastEventId,
+    waitForOpen,
   };
 }

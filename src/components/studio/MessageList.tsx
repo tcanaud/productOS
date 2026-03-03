@@ -5,13 +5,15 @@ import { cn } from '@/lib/utils';
 import type { Message } from './StudioLayout';
 import { MarkdownContent } from './MarkdownContent';
 import { PersonaMessageBubble } from './PersonaMessageBubble';
+import { RoundtableBlock } from './RoundtableBlock';
 
 type MessageListProps = {
   messages: Message[];
   isLoading: boolean;
+  onSuggestionClick?: (suggestion: string) => void;
 };
 
-export function MessageList({ messages, isLoading }: MessageListProps) {
+export function MessageList({ messages, isLoading, onSuggestionClick }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,19 +27,33 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
           key={message.id}
           className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}
         >
-          {/* Party-mode: staggered persona bubbles */}
+          {/* Party-mode: staggered persona bubbles + roundtable block */}
           {message.personas && message.personas.length > 0 ? (
             <div className="flex max-w-[90%] flex-col gap-2">
-              {message.personas.map((pm, idx) => (
-                <PersonaMessageBubble
-                  key={pm.personaId}
-                  displayName={pm.displayName}
-                  icon={pm.icon}
-                  color={pm.color}
-                  content={pm.content}
-                  animationDelay={idx * 150}
+              {message.personas.map((pm, idx) => {
+                // Resolve replyTo personaId to display name
+                const replyToName = pm.replyTo
+                  ? message.personas?.find((p) => p.personaId === pm.replyTo)?.displayName
+                  : undefined;
+                return (
+                  <PersonaMessageBubble
+                    key={pm.personaId}
+                    displayName={pm.displayName}
+                    icon={pm.icon}
+                    color={pm.color}
+                    content={pm.content}
+                    animationDelay={idx * 150}
+                    emotion={pm.emotion}
+                    replyToName={replyToName}
+                  />
+                );
+              })}
+              {message.roundtable && (
+                <RoundtableBlock
+                  data={message.roundtable}
+                  onSuggestionClick={onSuggestionClick}
                 />
-              ))}
+              )}
             </div>
           ) : (
             <div

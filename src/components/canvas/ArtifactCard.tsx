@@ -1,13 +1,15 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { MessageSquare, GitBranch, Star, FileText, BookOpen, StickyNote } from 'lucide-react';
+import { MessageSquare, GitBranch, Star, FileText, BookOpen, StickyNote, Sparkles } from 'lucide-react';
 import type { CanvasArtifact, ArtifactType } from '@/lib/canvas/types';
+import { MermaidThumbnail } from './MermaidThumbnail';
 
 interface ArtifactCardProps {
   artifact: CanvasArtifact;
   zoom: number;
   onDragEnd: (id: string, x: number, y: number) => void;
+  onDoubleClick?: (artifact: CanvasArtifact) => void;
 }
 
 const TYPE_META: Record<ArtifactType, { icon: React.ElementType; label: string; color: string }> = {
@@ -17,6 +19,7 @@ const TYPE_META: Record<ArtifactType, { icon: React.ElementType; label: string; 
   spec: { icon: FileText, label: 'Spec', color: 'text-green-500' },
   story: { icon: BookOpen, label: 'Story', color: 'text-rose-500' },
   note: { icon: StickyNote, label: 'Note', color: 'text-orange-500' },
+  studio: { icon: Sparkles, label: 'Studio', color: 'text-indigo-500' },
 };
 
 /**
@@ -25,7 +28,7 @@ const TYPE_META: Record<ArtifactType, { icon: React.ElementType; label: string; 
  * A draggable card positioned absolutely inside the canvas world div.
  * Uses pointer capture for smooth drag even when cursor leaves the element.
  */
-export function ArtifactCard({ artifact, zoom, onDragEnd }: ArtifactCardProps) {
+export function ArtifactCard({ artifact, zoom, onDragEnd, onDoubleClick }: ArtifactCardProps) {
   const { position, type, title, id } = artifact;
   const meta = TYPE_META[type] ?? TYPE_META.note;
   const Icon = meta.icon;
@@ -94,6 +97,7 @@ export function ArtifactCard({ artifact, zoom, onDragEnd }: ArtifactCardProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onDoubleClick={() => onDoubleClick?.(artifact)}
     >
       {/* Card header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border text-sm font-medium cursor-grab active:cursor-grabbing">
@@ -101,10 +105,35 @@ export function ArtifactCard({ artifact, zoom, onDragEnd }: ArtifactCardProps) {
         <span className="truncate">{title ?? meta.label}</span>
       </div>
 
-      {/* Card body — placeholder preview */}
-      <div className="p-3 text-muted-foreground text-xs flex items-center justify-center gap-2 h-[calc(100%-37px)]">
-        <Icon className={`h-6 w-6 ${meta.color} opacity-20`} />
-        <span className="opacity-50">{meta.label}</span>
+      {/* Card body — preview or placeholder */}
+      <div className="text-muted-foreground text-xs h-[calc(100%-37px)]">
+        {type === 'diagram' && artifact.preview?.mermaidContent ? (
+          <MermaidThumbnail content={artifact.preview.mermaidContent} />
+        ) : type === 'conversation' && artifact.preview?.excerpt ? (
+          <div className="flex items-center justify-center gap-2 h-full p-3">
+            <Icon className={`h-5 w-5 ${meta.color} opacity-40`} />
+            <span className="italic opacity-60">{artifact.preview.excerpt}</span>
+          </div>
+        ) : type === 'studio' ? (
+          <div className="flex flex-col items-center justify-center gap-2 h-full p-3">
+            <Icon className={`h-8 w-8 ${meta.color} opacity-30`} />
+            <span className="text-sm font-medium opacity-70">{title ?? 'Studio'}</span>
+            {artifact.preview?.excerpt && (
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                artifact.preview.excerpt === 'completed'
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                  : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+              }`}>
+                {artifact.preview.excerpt === 'completed' ? 'Completed' : 'Active'}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center gap-2 h-full p-3">
+            <Icon className={`h-6 w-6 ${meta.color} opacity-20`} />
+            <span className="opacity-50">{meta.label}</span>
+          </div>
+        )}
       </div>
     </div>
   );

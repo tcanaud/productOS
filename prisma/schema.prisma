@@ -37,6 +37,7 @@ model Workspace {
   chatSessions    ChatSession[]
   session         WorkspaceSession?
   canvasArtifacts CanvasArtifact[]
+  studios         Studio[]
 }
 
 model WorkspaceSession {
@@ -62,6 +63,7 @@ model Diagram {
   versions    DiagramVersion[]
   reviews     DiagramReview[]
   specs       Spec[]
+  studio      Studio?
 }
 
 model DiagramVersion {
@@ -140,12 +142,32 @@ model AIUsageLog {
   createdAt    DateTime @default(now())
 }
 
+// ── Studio model (Multi-Studio Persistence) ──────────────────────────────────
+
+model Studio {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  title          String    @default("Untitled Studio")
+  status         String    @default("active") // "active" | "completed"
+  graphState     Json?     // StudioSessionState serialized
+  checkpoint     Json?     // RunCheckpoint serialized
+  sseSessionId   String?
+  messageHistory Json?     // Message[] from frontend (personas, roundtable included)
+  diagramId      String?   @unique
+  diagram        Diagram?  @relation(fields: [diagramId], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, updatedAt])
+}
+
 // ── Canvas models (Story 8.1) ─────────────────────────────────────────────────
 
 model CanvasArtifact {
   id          String             @id @default(cuid())
   workspaceId String
-  type        String             // "diagram" | "conversation" | "review" | "spec" | "story" | "note"
+  type        String             // "diagram" | "conversation" | "review" | "spec" | "story" | "note" | "studio"
   refId       String?            // nullable FK to the underlying model (Diagram.id, Spec.id, etc.)
   x           Float              @default(0)
   y           Float              @default(0)

@@ -30,8 +30,8 @@ interface LiveReviewState {
   // Set by extract-nodes
   nodeList?: { id: string; label: string }[];
   nodesText?: string;
-  // Set by LLMNode (keyed as state.annotations)
-  annotations?: unknown;
+  // Set by LLMNode (keyed by node id: 'review')
+  review?: unknown;
   // Set by map-annotations
   mappedAnnotations?: Annotation[];
   error?: string;
@@ -117,7 +117,7 @@ export function createLiveReviewGraph() {
       id: 'map-annotations',
       fn: (ctx) => {
         const state = ctx.state as LiveReviewState;
-        const raw = state.annotations;
+        const raw = state.review;
         const nodeIds = new Set((state.nodeList ?? []).map((n) => n.id));
 
         let parsed: z.infer<typeof AnnotationRawSchema>;

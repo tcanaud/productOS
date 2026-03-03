@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useCanvasViewport } from '@/hooks/useCanvasViewport';
@@ -20,6 +21,7 @@ interface CanvasViewProps {
  * zoom (Ctrl+scroll / trackpad pinch), and artifact drag with persistence.
  */
 export function CanvasView({ workspaceId }: CanvasViewProps) {
+  const router = useRouter();
   const [canvasState, setCanvasState] = useState<CanvasState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -86,6 +88,15 @@ export function CanvasView({ workspaceId }: CanvasViewProps) {
     [handleArtifactMove]
   );
 
+  const handleArtifactDoubleClick = useCallback(
+    (artifact: CanvasArtifact) => {
+      if (artifact.type === 'studio' && artifact.refId) {
+        router.push(`/workspaces/${workspaceId}/studio/${artifact.refId}`);
+      }
+    },
+    [workspaceId, router]
+  );
+
   if (isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center">
@@ -134,6 +145,7 @@ export function CanvasView({ workspaceId }: CanvasViewProps) {
             artifact={artifact}
             zoom={zoom}
             onDragEnd={handleDragEnd}
+            onDoubleClick={handleArtifactDoubleClick}
           />
         ))}
       </div>

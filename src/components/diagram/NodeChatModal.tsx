@@ -10,11 +10,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, Send, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { JsonGraph } from '@/lib/json2mermaid/types';
 
 interface NodeChatModalProps {
   nodeId: string;
   nodeLabel: string;
   workspaceId: string;
+  graph: JsonGraph;
   onClose: () => void;
 }
 
@@ -23,7 +25,7 @@ interface ChatReply {
   content: string;
 }
 
-export function NodeChatModal({ nodeId, nodeLabel, workspaceId, onClose }: NodeChatModalProps) {
+export function NodeChatModal({ nodeId, nodeLabel, workspaceId, graph, onClose }: NodeChatModalProps) {
   const defaultQuestion = `Tell me more about the step: «${nodeLabel}»`;
   const [input, setInput] = useState(defaultQuestion);
   const [messages, setMessages] = useState<ChatReply[]>([]);
@@ -59,28 +61,32 @@ export function NodeChatModal({ nodeId, nodeLabel, workspaceId, onClose }: NodeC
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/ai/chat', {
+      const res = await fetch('/api/ai/node/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspaceId,
-          message: question,
-          context: { nodeId, nodeLabel },
+          nodeId,
+          nodeLabel,
+          question,
+          graph,
+          history: messages,
         }),
       });
 
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? `Server error ${res.status}`);
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: string | { message?: string };
+        };
+        const errMsg =
+          typeof err.error === 'string'
+            ? err.error
+            : err.error?.message ?? `Server error ${res.status}`;
+        throw new Error(errMsg);
       }
 
-      const data = (await res.json()) as {
-        responses?: Array<{ message: string }>;
-        reply?: string;
-      };
-
-      // Support both the full chat route (responses[]) and the stub ({ reply })
-      const reply = data.responses?.[0]?.message ?? data.reply ?? 'No response received.';
+      const data = (await res.json()) as { reply?: string; relatedNodes?: string[] };
+      const reply = data.reply ?? 'No response received.';
 
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {

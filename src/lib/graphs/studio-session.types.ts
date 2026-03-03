@@ -1,6 +1,6 @@
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { OnboardingPhase } from '@/lib/ai/prompts/onboarding';
-import type { PersonaMessage } from '@/lib/personas/parser';
+import type { PersonaMessage, Roundtable } from '@/lib/personas/parser';
 
 /**
  * State threaded through the studio-session claudegraph run.
@@ -16,7 +16,7 @@ export interface StudioSessionState {
   /** Current diagram in JsonGraph form (null until first generation). */
   currentDiagram: JsonGraph | null;
   /** Intent classified by parse-input node. */
-  intent: 'describe' | 'refine' | 'confirm' | 'other' | null;
+  intent: 'describe' | 'refine' | 'confirm' | 'discuss' | 'other' | null;
   /**
    * Context richness score 0–100.
    * enough-context? routes to generate when score >= 60.
@@ -46,6 +46,8 @@ export interface StudioSessionState {
   partyModeEnabled: boolean;
   /** Last parsed persona messages from the party-mode response parser. */
   personaMessages: PersonaMessage[];
+  /** Synthesized questions + suggested answers from the roundtable section. */
+  roundtable?: Roundtable;
 }
 
 /**
@@ -82,6 +84,8 @@ export type StudioInteractResponse =
       runId: string;
       checkpoint: unknown;
       personas?: PersonaMessage[];
+      roundtable?: Roundtable;
+      studioId?: string;
     }
   | {
       type: 'diagram';
@@ -90,6 +94,7 @@ export type StudioInteractResponse =
       checkpoint: unknown;
       patch?: DiagramPatch;
       patchAnimation?: PatchAnimationEvent;
+      studioId?: string;
     }
-  | { type: 'complete'; diagramId: string }
+  | { type: 'complete'; diagramId: string; studioId?: string }
   | { type: 'error'; message: string };

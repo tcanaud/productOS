@@ -75,7 +75,50 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
     }),
   ]);
 
-  const artifacts: CanvasArtifact[] = artifactRows.map(toClientArtifact);
+  // Batch-fetch diagram content for preview enrichment (+1 query, no N+1)
+  const diagramRefIds = artifactRows
+    .filter((a) => a.type === 'diagram' && a.refId)
+    .map((a) => a.refId as string);
+
+  const diagrams =
+    diagramRefIds.length > 0
+      ? await prisma.diagram.findMany({
+          where: { id: { in: diagramRefIds } },
+          select: { id: true, content: true },
+        })
+      : [];
+
+  const contentMap = new Map(diagrams.map((d) => [d.id, d.content]));
+
+  // Batch-fetch studio data for preview enrichment
+  const studioRefIds = artifactRows
+    .filter((a) => a.type === 'studio' && a.refId)
+    .map((a) => a.refId as string);
+
+  const studioRows =
+    studioRefIds.length > 0
+      ? await prisma.studio.findMany({
+          where: { id: { in: studioRefIds } },
+          select: { id: true, title: true, status: true },
+        })
+      : [];
+
+  const studioMap = new Map(studioRows.map((s) => [s.id, s]));
+
+  const artifacts: CanvasArtifact[] = artifactRows.map((row) => {
+    const base = toClientArtifact(row);
+    if (row.type === 'diagram' && row.refId && contentMap.has(row.refId)) {
+      base.preview = { mermaidContent: contentMap.get(row.refId)! };
+    } else if (row.type === 'studio' && row.refId && studioMap.has(row.refId)) {
+      const studio = studioMap.get(row.refId)!;
+      base.title = studio.title;
+      base.preview = { excerpt: studio.status };
+    } else if (row.type === 'conversation') {
+      base.preview = { excerpt: 'Studio conversation' };
+    }
+    return base;
+  });
+
   const connections: CanvasConnection[] = connectionRows.map((c) => ({
     id: c.id,
     sourceId: c.sourceId,

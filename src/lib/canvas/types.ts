@@ -6,13 +6,18 @@
  * with position data flattened into a CanvasPosition sub-object for convenience.
  */
 
-export type ArtifactType = 'diagram' | 'conversation' | 'review' | 'spec' | 'story' | 'note';
+export type ArtifactType = 'diagram' | 'conversation' | 'review' | 'spec' | 'story' | 'note' | 'studio';
 
 export interface CanvasPosition {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+export interface ArtifactPreview {
+  mermaidContent?: string;
+  excerpt?: string;
 }
 
 export interface CanvasArtifact {
@@ -23,6 +28,7 @@ export interface CanvasArtifact {
   title?: string | null;
   zIndex: number;
   position: CanvasPosition;
+  preview?: ArtifactPreview;
 }
 
 export interface CanvasConnection {

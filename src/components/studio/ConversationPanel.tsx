@@ -40,7 +40,7 @@ export function ConversationPanel({
           <SuggestionChips onSelect={onChipSelect} />
         </div>
       ) : (
-        <MessageList messages={messages} isLoading={isLoading} />
+        <MessageList messages={messages} isLoading={isLoading} onSuggestionClick={onChipSelect} />
       )}
 
       <div className="border-t border-border p-4">

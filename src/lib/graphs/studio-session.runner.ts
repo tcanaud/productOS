@@ -80,6 +80,15 @@ function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
           displayName: pm.displayName,
           icon: pm.icon ?? '',
           message: pm.content,
+          ...(pm.emotion ? { emotion: pm.emotion } : {}),
+          ...(pm.replyTo ? { replyTo: pm.replyTo } : {}),
+        });
+      }
+      // Emit roundtable block (questions + suggestions) after all personas
+      if (state.roundtable) {
+        sessionEventBus.emit(sessionId, 'roundtable', {
+          questions: state.roundtable.questions,
+          suggestions: state.roundtable.suggestions,
         });
       }
     } else {

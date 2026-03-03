@@ -255,11 +255,12 @@ export function DiagramPreviewPanel({
       )}
 
       {/* Node chat modal — opened by "Ask a question about this node" */}
-      {chatState && workspaceId && (
+      {chatState && workspaceId && graph && (
         <NodeChatModal
           nodeId={chatState.nodeId}
           nodeLabel={chatState.nodeLabel}
           workspaceId={workspaceId}
+          graph={graph}
           onClose={closeChat}
         />
       )}

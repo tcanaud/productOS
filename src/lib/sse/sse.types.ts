@@ -11,6 +11,7 @@ import type { JsonGraph } from '@/lib/json2mermaid/types';
 
 export type SSEEventType =
   | 'persona-message'
+  | 'roundtable'
   | 'interaction'
   | 'diagram-update'
   | 'diagram-full'
@@ -26,6 +27,13 @@ export interface PersonaMessagePayload {
   displayName: string;
   icon: string;
   message: string;
+  emotion?: string;
+  replyTo?: string;
+}
+
+export interface RoundtablePayload {
+  questions: string[];
+  suggestions: string[];
 }
 
 export interface InteractionPayload {
@@ -59,6 +67,7 @@ export interface SessionEndPayload {
 
 export interface SSEEventMap {
   'persona-message': PersonaMessagePayload;
+  roundtable: RoundtablePayload;
   interaction: InteractionPayload;
   'diagram-update': DiagramUpdatePayload;
   'diagram-full': DiagramFullPayload;
