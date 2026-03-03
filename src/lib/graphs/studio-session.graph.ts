@@ -877,7 +877,7 @@ export function createStudioSessionGraph() {
     .from('route-diagram')
     .to('refine')
     .when((ctx) => (ctx.state as StudioSessionState).intent === 'refine')
-    .priority(1)
+    .priority(2)
     .done();
 
   // route-diagram → persist (when intent is confirm)
