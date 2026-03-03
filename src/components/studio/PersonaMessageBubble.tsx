@@ -1,5 +1,7 @@
 'use client';
 
+import { MarkdownContent } from './MarkdownContent';
+
 interface PersonaMessageBubbleProps {
   displayName: string;
   icon: string;
@@ -47,10 +49,10 @@ export function PersonaMessageBubble({
 
       {/* Body */}
       <div
-        className="px-3 py-2 text-sm text-foreground border-l-4 bg-muted/40 whitespace-pre-wrap"
+        className="px-3 py-2 text-sm text-foreground border-l-4 bg-muted/40"
         style={{ borderLeftColor: color }}
       >
-        {content}
+        <MarkdownContent content={content} />
       </div>
     </div>
   );

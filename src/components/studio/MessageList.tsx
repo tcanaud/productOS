@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import type { Message } from './StudioLayout';
+import { MarkdownContent } from './MarkdownContent';
 import { PersonaMessageBubble } from './PersonaMessageBubble';
 
 type MessageListProps = {
@@ -47,7 +48,11 @@ export function MessageList({ messages, isLoading }: MessageListProps) {
                   : 'bg-muted text-muted-foreground'
               )}
             >
-              {message.content}
+              {message.role === 'user' ? (
+                message.content
+              ) : (
+                <MarkdownContent content={message.content} />
+              )}
             </div>
           )}
         </div>
