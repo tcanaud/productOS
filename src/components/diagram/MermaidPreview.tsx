@@ -3,6 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { mapSvgNodeId, mapSvgEdgeId } from '@/lib/svg/svg-id-mapper';
+import {
+  diffGraphs,
+  animateAddedNodes,
+  animateRemovedNodes,
+  animateAddedEdges,
+  animateInitialRender,
+} from '@/lib/svg/patch-animator';
+import type { JsonGraph } from '@/lib/json2mermaid/types';
 
 /** Position in viewport coordinates (clientX/clientY). */
 export type ClickPosition = { x: number; y: number };
@@ -25,6 +33,8 @@ const HOVER_STYLE = `
 
 type Props = {
   content: string;
+  /** Optional structured graph — used to diff against previous render for patch animations. */
+  graph?: JsonGraph;
   /** Called when the user clicks a diagram node. */
   onNodeClick?: (nodeId: string, pos: ClickPosition) => void;
   /** Called when the user clicks a diagram edge. */
@@ -33,8 +43,9 @@ type Props = {
 
 let mermaidInitialized = false;
 
-export function MermaidPreview({ content, onNodeClick, onEdgeClick }: Props) {
+export function MermaidPreview({ content, graph, onNodeClick, onEdgeClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevGraphRef = useRef<JsonGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -49,6 +60,27 @@ export function MermaidPreview({ content, onNodeClick, onEdgeClick }: Props) {
           mermaidInitialized = true;
         }
 
+        // ── Compute graph diff before re-render ───────────────────────────────
+        const isFirstRender = prevGraphRef.current === null;
+        let diff = {
+          addedNodes: [] as string[],
+          removedNodes: [] as string[],
+          addedEdges: [] as { from: string; to: string }[],
+          removedEdges: [] as { from: string; to: string }[],
+        };
+
+        if (graph) {
+          diff = diffGraphs(prevGraphRef.current, graph);
+        }
+
+        // ── Fade-out removed nodes BEFORE re-render ───────────────────────────
+        if (diff.removedNodes.length > 0 && containerRef.current) {
+          const svgEl = containerRef.current.querySelector('svg');
+          if (svgEl) {
+            await animateRemovedNodes(svgEl as unknown as SVGElement, diff.removedNodes);
+          }
+        }
+
         const id = `mermaid-${Date.now()}`;
         const { svg } = await mermaid.render(id, content.trim() || 'flowchart TD\n  A[Start]');
         if (!containerRef.current) return;
@@ -56,15 +88,29 @@ export function MermaidPreview({ content, onNodeClick, onEdgeClick }: Props) {
         containerRef.current.innerHTML = svg;
         setError(null);
 
-        // ── Inject hover CSS into the rendered SVG ────────────────────────
         const svgEl = containerRef.current.querySelector('svg');
         if (svgEl) {
+          // ── Inject hover CSS ──────────────────────────────────────────────
           const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
           styleEl.textContent = HOVER_STYLE;
           svgEl.insertBefore(styleEl, svgEl.firstChild);
+
+          const svgRoot = svgEl as unknown as SVGElement;
+
+          // ── Apply patch animations ────────────────────────────────────────
+          if (graph) {
+            if (isFirstRender) {
+              animateInitialRender(svgRoot);
+            } else {
+              animateAddedNodes(svgRoot, diff.addedNodes);
+              animateAddedEdges(svgRoot, diff.addedEdges);
+            }
+            // Update snapshot after animations are set up
+            prevGraphRef.current = graph;
+          }
         }
 
-        // ── Attach node handlers ──────────────────────────────────────────
+        // ── Attach node handlers ──────────────────────────────────────────────
         const nodeEls = containerRef.current.querySelectorAll<SVGGElement>('g.node');
         nodeEls.forEach((nodeEl) => {
           nodeEl.addEventListener('mouseenter', () => {
@@ -82,7 +128,7 @@ export function MermaidPreview({ content, onNodeClick, onEdgeClick }: Props) {
           }
         });
 
-        // ── Attach edge handlers ──────────────────────────────────────────
+        // ── Attach edge handlers ──────────────────────────────────────────────
         const edgeEls = containerRef.current.querySelectorAll<SVGGElement>('g.edgePath');
         edgeEls.forEach((edgeEl) => {
           edgeEl.addEventListener('mouseenter', () => {
@@ -110,7 +156,7 @@ export function MermaidPreview({ content, onNodeClick, onEdgeClick }: Props) {
     };
 
     void renderMermaid();
-  }, [content, onNodeClick, onEdgeClick]);
+  }, [content, graph, onNodeClick, onEdgeClick]);
 
   return (
     <div className="relative h-full w-full overflow-auto bg-white p-4">

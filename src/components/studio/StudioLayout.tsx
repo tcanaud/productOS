@@ -384,6 +384,7 @@ export function StudioLayout({ workspaceId }: StudioLayoutProps) {
           diagramContent={diagramContent}
           isStreaming={isStreaming}
           patchAnimation={patchAnimation}
+          graph={currentGraphRef.current ?? undefined}
         />
       </div>
     </div>

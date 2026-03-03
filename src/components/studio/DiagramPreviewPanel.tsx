@@ -6,6 +6,7 @@ import type { ClickPosition } from '@/components/diagram/MermaidPreview';
 import { DiagramContextMenu } from '@/components/diagram/DiagramContextMenu';
 import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
+import type { JsonGraph } from '@/lib/json2mermaid/types';
 
 type ContextMenuState =
   | { type: 'node'; nodeId: string; position: ClickPosition }
@@ -16,6 +17,8 @@ export type DiagramPreviewPanelProps = {
   diagramContent?: string;
   isStreaming?: boolean;
   patchAnimation?: PatchAnimationEvent;
+  /** Structured graph powering the diagram — forwarded to MermaidPreview for patch animations. */
+  graph?: JsonGraph;
   /** Called when the user selects an action from the context menu. */
   onDiagramAction?: (action: DiagramAction) => void;
 };
@@ -24,6 +27,7 @@ export function DiagramPreviewPanel({
   diagramContent,
   isStreaming = false,
   patchAnimation,
+  graph,
   onDiagramAction,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
@@ -110,6 +114,7 @@ export function DiagramPreviewPanel({
         >
           <MermaidPreview
             content={diagramContent!}
+            graph={graph}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
           />
