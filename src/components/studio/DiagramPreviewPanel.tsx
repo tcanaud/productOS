@@ -1,22 +1,54 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { MermaidPreview } from '@/components/diagram/MermaidPreview';
+import type { ClickPosition } from '@/components/diagram/MermaidPreview';
+import { DiagramContextMenu } from '@/components/diagram/DiagramContextMenu';
+import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
+
+type ContextMenuState =
+  | { type: 'node'; nodeId: string; position: ClickPosition }
+  | { type: 'edge'; edgeFrom: string; edgeTo: string; position: ClickPosition }
+  | null;
 
 export type DiagramPreviewPanelProps = {
   diagramContent?: string;
   isStreaming?: boolean;
   patchAnimation?: PatchAnimationEvent;
+  /** Called when the user selects an action from the context menu. */
+  onDiagramAction?: (action: DiagramAction) => void;
 };
 
 export function DiagramPreviewPanel({
   diagramContent,
   isStreaming = false,
   patchAnimation,
+  onDiagramAction,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+
+  const handleNodeClick = useCallback((nodeId: string, pos: ClickPosition) => {
+    setContextMenu({ type: 'node', nodeId, position: pos });
+  }, []);
+
+  const handleEdgeClick = useCallback(
+    (_edgeId: string, pos: ClickPosition, from: string, to: string) => {
+      setContextMenu({ type: 'edge', edgeFrom: from, edgeTo: to, position: pos });
+    },
+    []
+  );
+
+  const handleAction = useCallback(
+    (action: DiagramAction) => {
+      onDiagramAction?.(action);
+    },
+    [onDiagramAction]
+  );
+
+  const closeMenu = useCallback(() => setContextMenu(null), []);
 
   // Apply patch animation classes to the diagram container when a patch is applied
   useEffect(() => {
@@ -76,8 +108,33 @@ export function DiagramPreviewPanel({
           className="h-full w-full rounded-lg border border-border overflow-hidden transition-opacity duration-300"
           style={{ opacity: 1 }}
         >
-          <MermaidPreview content={diagramContent!} />
+          <MermaidPreview
+            content={diagramContent!}
+            onNodeClick={handleNodeClick}
+            onEdgeClick={handleEdgeClick}
+          />
         </div>
+      )}
+
+      {/* Context menu — rendered when a node or edge is clicked */}
+      {contextMenu?.type === 'node' && (
+        <DiagramContextMenu
+          type="node"
+          nodeId={contextMenu.nodeId}
+          position={contextMenu.position}
+          onAction={handleAction}
+          onClose={closeMenu}
+        />
+      )}
+      {contextMenu?.type === 'edge' && (
+        <DiagramContextMenu
+          type="edge"
+          edgeFrom={contextMenu.edgeFrom}
+          edgeTo={contextMenu.edgeTo}
+          position={contextMenu.position}
+          onAction={handleAction}
+          onClose={closeMenu}
+        />
       )}
     </div>
   );
