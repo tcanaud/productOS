@@ -116,7 +116,7 @@ export function createGenerateFlowGraph() {
         return `${state.systemPrompt}\n\n${state.userPrompt}`;
       },
       maxRepairs: 2,
-      timeoutMs: 60_000,
+      timeoutMs: 120_000,
     })
   );
 

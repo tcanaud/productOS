@@ -2,7 +2,6 @@ import type { AIEndpoint, AIModel } from './config';
 import { ENDPOINT_CONFIG } from './config';
 import type { TokenUsage } from './token-tracker';
 import type { ReviewOutput } from './schemas/review-output';
-import { MultiProfileReviewSchema } from './schemas/review-output';
 import type { MultiProfileReview } from './schemas/review-output';
 import type { GeneratedSpec } from './schemas/spec-output';
 import { GeneratedSpecSchema } from './schemas/spec-output';
@@ -14,12 +13,8 @@ import type { DiagramType } from '@/lib/json2mermaid/types';
 import { anthropic } from './client';
 import { parseStructuredResponse } from './structured-output';
 import { withRetry } from './error-handler';
-import { runGenerateFlowGraph } from './graphs';
-import {
-  buildReviewSystemPrompt,
-  buildReviewUserPrompt,
-  extractMermaidNodes,
-} from './prompts/review-profiles';
+import { runGenerateFlowGraph, runReviewDiagramGraph } from './graphs';
+import { extractMermaidNodes } from './prompts/review-profiles';
 import { buildSpecSystemPrompt, buildSpecUserPrompt } from './prompts/spec-generation';
 
 export interface AIResult<T> {
@@ -125,37 +120,17 @@ export const aiService = {
       ? (profile as 'optimist' | 'moderate' | 'critic')
       : 'moderate';
 
-    const config = ENDPOINT_CONFIG['review'];
-    const model = options.model ?? config.model;
-    const nodes = extractMermaidNodes(diagram);
-    const system = buildReviewSystemPrompt(validatedProfile);
-    const user = buildReviewUserPrompt(diagram, nodes, validatedProfile);
-
     const start = Date.now();
 
-    const response = await withRetry(
-      () =>
-        anthropic.messages.create({
-          model,
-          max_tokens: config.maxTokens,
-          temperature: config.temperature,
-          system,
-          messages: [{ role: 'user', content: user }],
-        }),
-      { maxRetries: 1 }
-    );
+    const result = await runReviewDiagramGraph(diagram, validatedProfile);
 
     const latencyMs = Date.now() - start;
 
-    const usage: TokenUsage = {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+    return {
+      review: result.review as MultiProfileReview,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      latencyMs,
     };
-
-    const review = parseStructuredResponse(response, MultiProfileReviewSchema);
-
-    return { review, usage, latencyMs };
   },
 
   /**
