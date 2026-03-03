@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, GitBranch, FileText, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, GitBranch, FileText, MessageCircle, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const WORKSPACE_NAV = [
   { segment: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { segment: 'studio', label: 'Studio', icon: Sparkles },
   { segment: 'diagrams', label: 'Diagrams', icon: GitBranch },
   { segment: 'specs', label: 'Specs', icon: FileText },
   { segment: 'chat', label: 'Chat', icon: MessageCircle },

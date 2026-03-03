@@ -25,16 +25,29 @@ model User {
 }
 
 model Workspace {
-  id           String            @id @default(cuid())
-  name         String
-  description  String?
-  ownerId      String
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-  owner        User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  members      WorkspaceMember[]
-  diagrams     Diagram[]
-  chatSessions ChatSession[]
+  id              String            @id @default(cuid())
+  name            String
+  description     String?
+  ownerId         String
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  owner           User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members         WorkspaceMember[]
+  diagrams        Diagram[]
+  chatSessions    ChatSession[]
+  session         WorkspaceSession?
+  canvasArtifacts CanvasArtifact[]
+}
+
+model WorkspaceSession {
+  id           String    @id @default(cuid())
+  workspaceId  String    @unique
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  activeAgents String[]  @default([])
+  lastActivity DateTime  @default(now()) @updatedAt
+  state        Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model Diagram {
@@ -125,4 +138,34 @@ model AIUsageLog {
   latencyMs    Int
   success      Boolean
   createdAt    DateTime @default(now())
+}
+
+// ── Canvas models (Story 8.1) ─────────────────────────────────────────────────
+
+model CanvasArtifact {
+  id          String             @id @default(cuid())
+  workspaceId String
+  type        String             // "diagram" | "conversation" | "review" | "spec" | "story" | "note"
+  refId       String?            // nullable FK to the underlying model (Diagram.id, Spec.id, etc.)
+  x           Float              @default(0)
+  y           Float              @default(0)
+  width       Float              @default(480)
+  height      Float              @default(360)
+  zIndex      Int                @default(0)
+  title       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  outgoing    CanvasConnection[] @relation("ConnectionSource")
+  incoming    CanvasConnection[] @relation("ConnectionTarget")
+}
+
+model CanvasConnection {
+  id        String         @id @default(cuid())
+  sourceId  String
+  targetId  String
+  label     String?
+  createdAt DateTime       @default(now())
+  source    CanvasArtifact @relation("ConnectionSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  target    CanvasArtifact @relation("ConnectionTarget", fields: [targetId], references: [id], onDelete: Cascade)
 }
