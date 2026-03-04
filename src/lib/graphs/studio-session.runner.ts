@@ -69,7 +69,7 @@ function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
         sessionEventBus.emit(sessionId, 'diagram-full', {
           jsonGraph: state.currentDiagram,
           mermaidSyntax,
-          summary: 'Here\'s the diagram I\'ve generated based on our conversation.',
+          summary: "Here's the diagram I've generated based on our conversation.",
         });
       }
       return;
@@ -113,12 +113,17 @@ function emitSSEEvents(sessionId: string, outcome: RunOutcome): void {
  * @param userMessage - First message from the user.
  * @param sessionId - Optional logical session ID for SSE event routing.
  * @param sessionDir - Optional absolute path to the BMAD session directory (Story 6.7).
+ * @param layerOverrides - Optional layer-awareness fields (Story 10.1).
  */
 export async function startStudioSession(
   workspaceId: string,
   userMessage: string,
   sessionId?: string,
-  sessionDir?: string
+  sessionDir?: string,
+  layerOverrides?: {
+    currentLayerId?: string | null;
+    layerStack?: { graphId: string; label: string }[];
+  }
 ): Promise<RunOutcome> {
   const { runner } = createStudioSessionRunner();
 
@@ -140,6 +145,11 @@ export async function startStudioSession(
     personaMessages: [],
     // Story 6.5: patch tracking fields
     patchHistory: [],
+    // Story 10.1: layer-awareness fields
+    ...(layerOverrides?.currentLayerId !== undefined
+      ? { currentLayerId: layerOverrides.currentLayerId }
+      : {}),
+    ...(layerOverrides?.layerStack ? { layerStack: layerOverrides.layerStack } : {}),
   };
 
   const outcome = await runner.run(initialState);

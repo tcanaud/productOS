@@ -70,6 +70,9 @@ export async function POST(
     activeBranchName?: string;
     turnNumber?: number;
     messageHistory?: unknown[];
+    // Story 10.1: layer-awareness fields
+    currentLayerId?: string | null;
+    layerStack?: { graphId: string; label: string }[];
   };
   try {
     body = await request.json();
@@ -98,7 +101,8 @@ export async function POST(
 
     // If no studioId and no checkpoint (first message), create a new studio
     if (!studioId && !checkpoint) {
-      const autoTitle = userMessage.trim().slice(0, 50) + (userMessage.trim().length > 50 ? '…' : '');
+      const autoTitle =
+        userMessage.trim().slice(0, 50) + (userMessage.trim().length > 50 ? '…' : '');
       studioId = await studioPersistence.create(workspaceId, autoTitle);
     }
 
@@ -110,12 +114,17 @@ export async function POST(
     } else {
       // Story 6.7: ensure BMAD session exists and load context for this workspace
       const sessionCtx = await sessionManager.loadContext(workspaceId);
-      // Start new session (Story 6.6: pass sessionId; Story 6.7: pass sessionDir)
+      // Start new session (Story 6.6: pass sessionId; Story 6.7: pass sessionDir;
+      // Story 10.1: pass layer fields)
       outcome = await startStudioSession(
         workspaceId,
         userMessage.trim(),
         sessionId,
-        sessionCtx.sessionDir
+        sessionCtx.sessionDir,
+        {
+          currentLayerId: body.currentLayerId ?? null,
+          layerStack: body.layerStack ?? [],
+        }
       );
     }
 
@@ -157,7 +166,11 @@ export async function POST(
         mermaidPreview,
       });
 
-      await checkpointPersistence.updateHead(studioId, newCheckpointInfo.id, newCheckpointInfo.branchName);
+      await checkpointPersistence.updateHead(
+        studioId,
+        newCheckpointInfo.id,
+        newCheckpointInfo.branchName
+      );
     }
 
     if (outcome.status === 'ended') {
@@ -283,9 +296,7 @@ export async function POST(
         finalState.partyModeEnabled && finalState.personaMessages.length > 0
           ? { personas: finalState.personaMessages }
           : {};
-      const roundtablePayload = finalState.roundtable
-        ? { roundtable: finalState.roundtable }
-        : {};
+      const roundtablePayload = finalState.roundtable ? { roundtable: finalState.roundtable } : {};
 
       return NextResponse.json({
         type: 'question',

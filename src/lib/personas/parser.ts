@@ -49,14 +49,18 @@ export interface PartyModeResult {
   roundtable?: Roundtable;
 }
 
-const DELIMITER_REGEX = /---PERSONA:([a-zA-Z0-9_-]+)(?:\s+emotion=([a-zA-Z]+))?(?:\s+replyTo=([a-zA-Z0-9_-]+|none))?---/;
+const DELIMITER_REGEX =
+  /---PERSONA:([a-zA-Z0-9_-]+)(?:\s+emotion=([a-zA-Z]+))?(?:\s+replyTo=([a-zA-Z0-9_-]+|none))?---/;
 const ROUNDTABLE_DELIMITER = /---ROUNDTABLE---/i;
 
 /**
  * Parse the ---ROUNDTABLE--- section into questions and suggestions.
  */
 function parseRoundtable(text: string): Roundtable {
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const questions: string[] = [];
   const suggestions: string[] = [];
 
@@ -72,13 +76,13 @@ function parseRoundtable(text: string): Roundtable {
 }
 
 /**
- * Parse a party-mode LLM response into persona messages + roundtable.
+ * Parse a party-mode LLM response into persona messages + roundtable (full result).
  *
  * If the response contains `---PERSONA:<id>---` delimiters, it splits on them.
  * If a `---ROUNDTABLE---` section is found, questions and suggestions are extracted.
  * If no delimiters are found, the entire response is attributed to "Product Strategist" (john).
  */
-export function parsePartyModeResponse(raw: string): PartyModeResult {
+export function parsePartyModeResponseFull(raw: string): PartyModeResult {
   // Split off the ROUNDTABLE section first (if present)
   let mainContent = raw;
   let roundtable: Roundtable | undefined;
@@ -96,7 +100,8 @@ export function parsePartyModeResponse(raw: string): PartyModeResult {
 
   const lines = mainContent.split('\n');
 
-  const sections: { id: string; emotion?: PersonaEmotion; replyTo?: string; lines: string[] }[] = [];
+  const sections: { id: string; emotion?: PersonaEmotion; replyTo?: string; lines: string[] }[] =
+    [];
   let currentId: string | null = null;
   let currentEmotion: PersonaEmotion | undefined;
   let currentReplyTo: string | undefined;
@@ -107,10 +112,16 @@ export function parsePartyModeResponse(raw: string): PartyModeResult {
     if (match) {
       // Save previous section if any
       if (currentId !== null) {
-        sections.push({ id: currentId, emotion: currentEmotion, replyTo: currentReplyTo, lines: currentLines });
+        sections.push({
+          id: currentId,
+          emotion: currentEmotion,
+          replyTo: currentReplyTo,
+          lines: currentLines,
+        });
       }
       currentId = match[1].toLowerCase();
-      currentEmotion = match[2] && VALID_EMOTIONS.has(match[2]) ? (match[2] as PersonaEmotion) : undefined;
+      currentEmotion =
+        match[2] && VALID_EMOTIONS.has(match[2]) ? (match[2] as PersonaEmotion) : undefined;
       currentReplyTo = match[3] && match[3] !== 'none' ? match[3].toLowerCase() : undefined;
       currentLines = [];
     } else if (currentId !== null) {
@@ -120,7 +131,12 @@ export function parsePartyModeResponse(raw: string): PartyModeResult {
 
   // Save last section
   if (currentId !== null) {
-    sections.push({ id: currentId, emotion: currentEmotion, replyTo: currentReplyTo, lines: currentLines });
+    sections.push({
+      id: currentId,
+      emotion: currentEmotion,
+      replyTo: currentReplyTo,
+      lines: currentLines,
+    });
   }
 
   // Fallback: no delimiters found — attribute to Product Strategist
@@ -156,4 +172,12 @@ export function parsePartyModeResponse(raw: string): PartyModeResult {
   });
 
   return { personas, roundtable };
+}
+
+/**
+ * Parse a party-mode LLM response into a PersonaMessage array.
+ * Convenience wrapper over parsePartyModeResponseFull — roundtable data is discarded.
+ */
+export function parsePartyModeResponse(raw: string): PersonaMessage[] {
+  return parsePartyModeResponseFull(raw).personas;
 }

@@ -1,12 +1,17 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { Map, X } from 'lucide-react';
 import { ConversationPanel } from './ConversationPanel';
 import { DiagramPreviewPanel } from './DiagramPreviewPanel';
 import { InteractionWidget } from './InteractionWidget';
 import { SSEConnectionBadge } from './SSEConnectionBadge';
+import { LayerBreadcrumb } from './LayerBreadcrumb';
+import { LayerMinimap } from './LayerMinimap';
 import { useStudioStream } from '@/hooks/useStudioStream';
+import { useLayerNavigation } from '@/hooks/useLayerNavigation';
 import { applyPatch } from '@/lib/graphs/patch-applier';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import type {
@@ -15,6 +20,7 @@ import type {
   DiagramFullPayload,
   DiagramUpdatePayload,
   InteractionPayload,
+  RestructureProgressPayload,
 } from '@/lib/sse/sse.types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
@@ -22,8 +28,15 @@ import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 import type { LiveReviewItem } from '@/lib/session/types';
 import { ReviewTaskPanel } from './ReviewTaskPanel';
 import { CheckpointTimeline } from './CheckpointTimeline';
+import { PortEditor } from './PortEditor';
+import { PortInferencePreview } from './PortInferencePreview';
 import { useCheckpointTree } from '@/hooks/useCheckpointTree';
 import type { StudioSessionState } from '@/lib/graphs/studio-session.types';
+import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
+import type { InferredPort, PortInferenceResult } from '@/lib/layer/port-inference';
+import { validateContracts } from '@/lib/layer/contract-validator';
+import type { ValidationWarning } from '@/lib/layer/contract-validator';
+import type { LayerGraphRecord } from '@/lib/layer/types';
 
 export type PersonaBubble = {
   personaId: string;
@@ -57,6 +70,18 @@ interface StudioLayoutProps {
 }
 
 export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Story 9.3 — Layer navigation store
+  const {
+    pushLayer,
+    popLayer,
+    layerStack,
+    setStack,
+    reset: resetLayerStack,
+  } = useLayerNavigation();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -84,6 +109,24 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   // Checkpoint tree for undo/redo/branching
   const cpTree = useCheckpointTree();
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
+
+  // Story 9.4 — Layer minimap toggle
+  const [minimapOpen, setMinimapOpen] = useState(false);
+
+  // Story 9.5 — Port editor state
+  const [portEditorLayerId, setPortEditorLayerId] = useState<string | null>(null);
+  // Story 10.2 — Port inference state
+  const [portEditorInitialPorts, setPortEditorInitialPorts] = useState<InferredPort[] | undefined>(
+    undefined
+  );
+  const [portInferenceState, setPortInferenceState] = useState<{
+    layerId: string;
+    result: PortInferenceResult;
+  } | null>(null);
+
+  // Story 10.3 — Contract validation warnings + debounce ref
+  const [validationWarnings, setValidationWarnings] = useState<ValidationWarning[]>([]);
+  const contractDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -156,26 +199,174 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     };
   }, [studioId, workspaceId]);
 
-  // Prune review items whose nodeId no longer exists in the current graph
-  const pruneStaleReviewItems = useCallback((graph: JsonGraph) => {
-    const nodeIds = new Set(graph.nodes.map((n) => n.id));
-    setLiveReviewItems((prev) => {
-      const filtered = prev.filter((item) => nodeIds.has(item.nodeId));
-      if (filtered.length < prev.length) {
-        // Persist pruned list (best-effort)
-        fetch('/api/ai/live-review', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workspaceId,
-            studioId: currentStudioIdRef.current,
-            dismissIds: prev.filter((item) => !nodeIds.has(item.nodeId)).map((item) => item.id),
-          }),
-        }).catch(() => {});
+  // Story 9.3 — Reconstruct layerStack from ?layer=xyz URL param on page load
+  useEffect(() => {
+    const layerParam = searchParams.get('layer');
+    if (!layerParam) {
+      resetLayerStack();
+      return;
+    }
+
+    let cancelled = false;
+    async function reconstructStack() {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/layers/${layerParam}/ancestors`);
+        if (!res.ok || cancelled) return;
+        const ancestors = await res.json();
+        if (!cancelled && Array.isArray(ancestors)) {
+          setStack(ancestors);
+          // Load the layer's graph as active diagram
+          const layerRes = await fetch(`/api/workspaces/${workspaceId}/layers/${layerParam}`);
+          if (!layerRes.ok || cancelled) return;
+          const layerData = await layerRes.json();
+          if (cancelled) return;
+          const layerGraph = layerData.layer?.graph as JsonGraph | undefined;
+          if (layerGraph) {
+            currentGraphRef.current = layerGraph;
+            try {
+              const mermaid = json2mermaid(layerGraph);
+              setDiagramContent(mermaid);
+            } catch {
+              // Best-effort
+            }
+          }
+        }
+      } catch {
+        // Best-effort layer reconstruction
       }
-      return filtered;
-    });
-  }, [workspaceId]);
+    }
+
+    void reconstructStack();
+    return () => {
+      cancelled = true;
+    };
+    // Only run on mount / when layerParam changes — not on every searchParams object change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, searchParams.get('layer')]);
+
+  // Story 9.3 — Navigate into a composite node's child layer
+  const handleNavigateToLayer = useCallback(
+    async (childGraphId: string, nodeLabel: string) => {
+      pushLayer({ graphId: childGraphId, label: nodeLabel });
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('layer', childGraphId);
+      router.replace(`?${params.toString()}`);
+
+      // Load the child layer's graph
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/layers/${childGraphId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const layerGraph = data.layer?.graph as JsonGraph | undefined;
+        if (layerGraph) {
+          currentGraphRef.current = layerGraph;
+          try {
+            const mermaid = json2mermaid(layerGraph);
+            setDiagramContent(mermaid);
+          } catch {
+            // Best-effort
+          }
+        }
+      } catch {
+        toast.error('Failed to load layer');
+      }
+    },
+    [pushLayer, router, searchParams, workspaceId]
+  );
+
+  // Story 9.3 — Pop back to parent layer
+  const handlePopLayer = useCallback(async () => {
+    const newStack = layerStack.slice(0, -1);
+    popLayer();
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (newStack.length <= 1) {
+      // Back at root — remove layer param
+      params.delete('layer');
+    } else {
+      params.set('layer', newStack[newStack.length - 1].graphId);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : '?');
+
+    // Reload parent layer's graph if applicable
+    const parentEntry = newStack.length > 0 ? newStack[newStack.length - 1] : null;
+    if (parentEntry) {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/layers/${parentEntry.graphId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const layerGraph = data.layer?.graph as JsonGraph | undefined;
+        if (layerGraph) {
+          currentGraphRef.current = layerGraph;
+          try {
+            const mermaid = json2mermaid(layerGraph);
+            setDiagramContent(mermaid);
+          } catch {
+            // Best-effort
+          }
+        }
+      } catch {
+        // Best-effort
+      }
+    } else {
+      // Back at root — clear layer-specific diagram (studio's own diagram remains)
+      // No-op: the studio diagram was already in diagramContent before layer navigation
+    }
+  }, [layerStack, popLayer, router, searchParams, workspaceId]);
+
+  // Story 10.3 — Run contract validation against the current layer (if any)
+  const runContractValidation = useCallback(
+    async (layerId: string, parentGraph: JsonGraph) => {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/layers/${layerId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { layer: LayerGraphRecord };
+        const layer = data.layer;
+        if (!layer) return;
+        const warnings = validateContracts(layer, parentGraph);
+        setValidationWarnings(warnings);
+      } catch {
+        // Best-effort
+      }
+    },
+    [workspaceId]
+  );
+
+  // Story 10.3 — Debounced contract validation (2s) — triggered after port/edge saves
+  const scheduleContractValidation = useCallback(
+    (layerId: string, parentGraph: JsonGraph) => {
+      if (contractDebounceRef.current) clearTimeout(contractDebounceRef.current);
+      contractDebounceRef.current = setTimeout(() => {
+        void runContractValidation(layerId, parentGraph);
+      }, 2000);
+    },
+    [runContractValidation]
+  );
+
+  // Prune review items whose nodeId no longer exists in the current graph
+  const pruneStaleReviewItems = useCallback(
+    (graph: JsonGraph) => {
+      const nodeIds = new Set(graph.nodes.map((n) => n.id));
+      setLiveReviewItems((prev) => {
+        const filtered = prev.filter((item) => nodeIds.has(item.nodeId));
+        if (filtered.length < prev.length) {
+          // Persist pruned list (best-effort)
+          fetch('/api/ai/live-review', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workspaceId,
+              studioId: currentStudioIdRef.current,
+              dismissIds: prev.filter((item) => !nodeIds.has(item.nodeId)).map((item) => item.id),
+            }),
+          }).catch(() => {});
+        }
+        return filtered;
+      });
+    },
+    [workspaceId]
+  );
 
   // Process incoming SSE events in arrival order
   useEffect(() => {
@@ -199,9 +390,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           // Append to an existing persona-group assistant message if it's the last one
           if (lastMsg?.role === 'assistant' && lastMsg.personas) {
             return prev.map((m, i) =>
-              i === prev.length - 1
-                ? { ...m, personas: [...(m.personas ?? []), bubble] }
-                : m
+              i === prev.length - 1 ? { ...m, personas: [...(m.personas ?? []), bubble] } : m
             );
           }
           return [
@@ -224,7 +413,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           if (lastMsg?.role === 'assistant') {
             return prev.map((m, i) =>
               i === prev.length - 1
-                ? { ...m, roundtable: { questions: payload.questions, suggestions: payload.suggestions } }
+                ? {
+                    ...m,
+                    roundtable: { questions: payload.questions, suggestions: payload.suggestions },
+                  }
                 : m
             );
           }
@@ -300,6 +492,31 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         setIsLoading(false);
         checkpointRef.current = null;
         setSessionId(null);
+      } else if (event.type === 'restructure-progress') {
+        // Story 11.1 / 11.2: display restructure progress as a chat message
+        const payload = event.data as RestructureProgressPayload;
+        const stepEmoji: Record<string, string> = {
+          analyzing: '🔍',
+          proposing: '💡',
+          negotiating: '🤝',
+          applying: '⚙️',
+          'checkpoint-created': '💾',
+          'transaction-start': '⚙️',
+          'cluster-applied': '🧩',
+          'validation-done': '✔️',
+          done: '✅',
+        };
+        const emoji = stepEmoji[payload.step] ?? '📊';
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: event.id,
+            role: 'assistant' as const,
+            content: `${emoji} **Restructure** — ${payload.message}`,
+            timestamp: new Date(event.timestamp),
+          },
+        ]);
+        setIsLoading(false);
       }
     }
   }, [events, pruneStaleReviewItems]);
@@ -352,26 +569,98 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   );
 
   // Send a review item to chat for discussion
-  const handleSendReviewToChat = useCallback(
-    (item: LiveReviewItem) => {
-      const chatMessage = `I'd like to discuss this review observation about node "${item.nodeId}":\n\n> ${item.message}${item.description ? `\n> ${item.description}` : ''}\n\n${item.suggestions?.length ? `Suggestions: \n- ${item.suggestions.join('\n- ')}` : ''}\n\nWhat do you suggest?`;
-      setInputValue(chatMessage);
-      inputRef.current?.focus();
+  const handleSendReviewToChat = useCallback((item: LiveReviewItem) => {
+    const chatMessage = `I'd like to discuss this review observation about node "${item.nodeId}":\n\n> ${item.message}${item.description ? `\n> ${item.description}` : ''}\n\n${item.suggestions?.length ? `Suggestions: \n- ${item.suggestions.join('\n- ')}` : ''}\n\nWhat do you suggest?`;
+    setInputValue(chatMessage);
+    inputRef.current?.focus();
+  }, []);
+
+  // Story 9.5 / 10.2 — Handle diagram actions from the context menu (non-AI branch)
+  const handleDiagramAction = useCallback(
+    async (action: DiagramAction) => {
+      if (action.type === 'edit-ports') {
+        setPortEditorInitialPorts(undefined);
+        setPortEditorLayerId(action.layerId);
+        return;
+      }
+
+      // Story 10.2 — Decompose node into a child layer, then run AI port inference
+      if (action.type === 'decompose-to-layer') {
+        const { nodeId, nodeLabel, parentGraphId } = action;
+        try {
+          // 1. Create the child layer
+          const createRes = await fetch(
+            `/api/workspaces/${workspaceId}/layers/${parentGraphId}/child`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: nodeLabel, parentNodeId: nodeId }),
+            }
+          );
+          if (!createRes.ok) {
+            const errData = (await createRes.json().catch(() => ({}))) as { error?: string };
+            toast.error(errData.error ?? 'Failed to create layer');
+            return;
+          }
+          const createData = (await createRes.json()) as { layer: { id: string } };
+          const childLayerId = createData.layer.id;
+
+          // 2. Run AI port inference
+          try {
+            const inferRes = await fetch(
+              `/api/workspaces/${workspaceId}/layers/${childLayerId}/infer-ports`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nodeId, parentGraphId }),
+              }
+            );
+            if (inferRes.ok) {
+              const inferData = (await inferRes.json()) as PortInferenceResult;
+              // 3. Show inference preview (non-destructive)
+              setPortInferenceState({ layerId: childLayerId, result: inferData });
+            } else {
+              // Graceful degradation: open PortEditor empty
+              setPortEditorInitialPorts(undefined);
+              setPortEditorLayerId(childLayerId);
+            }
+          } catch {
+            // Graceful degradation: open PortEditor empty
+            setPortEditorInitialPorts(undefined);
+            setPortEditorLayerId(childLayerId);
+          }
+        } catch {
+          toast.error('Failed to decompose node into layer');
+        }
+        return;
+      }
+
+      // Other non-AI actions can be handled here in future stories
     },
-    []
+    [workspaceId]
   );
 
   // Story 7.4: handle graph update from AI node actions (expand / simplify)
-  const handleGraphUpdate = useCallback((updatedGraph: JsonGraph) => {
-    currentGraphRef.current = updatedGraph;
-    pruneStaleReviewItems(updatedGraph);
-    try {
-      const mermaid = json2mermaid(updatedGraph);
-      setDiagramContent(mermaid);
-    } catch {
-      // If conversion fails, keep the existing diagram content unchanged
-    }
-  }, [pruneStaleReviewItems]);
+  // Story 10.3: run contract validation immediately (no debounce) for AI-generated changes
+  const handleGraphUpdate = useCallback(
+    (updatedGraph: JsonGraph) => {
+      currentGraphRef.current = updatedGraph;
+      pruneStaleReviewItems(updatedGraph);
+      try {
+        const mermaid = json2mermaid(updatedGraph);
+        setDiagramContent(mermaid);
+      } catch {
+        // If conversion fails, keep the existing diagram content unchanged
+      }
+      // Immediate contract validation for AI-generated changes
+      const currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      if (currentLayerId) {
+        void runContractValidation(currentLayerId, updatedGraph);
+      }
+    },
+    [pruneStaleReviewItems, layerStack, runContractValidation]
+  );
 
   // Helper to get current messages for persistence (uses a ref to avoid stale closures)
   const messagesRef = useRef<Message[]>(messages);
@@ -426,6 +715,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       body.activeBranchName = cpTree.activeBranch;
       body.turnNumber = cpTree.turnNumber;
       body.messageHistory = messagesRef.current;
+      // Story 10.1: layer-awareness
+      body.currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      body.layerStack = layerStack;
 
       try {
         const res = await fetch(`/api/studio/${workspaceId}/interact`, {
@@ -527,6 +820,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       body.activeBranchName = cpTree.activeBranch;
       body.turnNumber = cpTree.turnNumber;
       body.messageHistory = messagesRef.current;
+      // Story 10.1: layer-awareness — send current layer context to the server
+      body.currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      body.layerStack = layerStack;
 
       const res = await fetch(`/api/studio/${workspaceId}/interact`, {
         method: 'POST',
@@ -662,11 +959,29 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   }, []);
 
   // Checkpoint restore handler — updates all studio state from a past checkpoint
+  // Story 11.2: if the checkpoint is tagged "pre-restructure", also restore LayerGraphs
   const handleCheckpointRestore = useCallback(
     async (checkpointId: string) => {
       const sid = currentStudioId;
       if (!sid) return;
       setIsLoading(true);
+
+      // Check if this is a pre-restructure checkpoint (Story 11.2)
+      const cpNode = cpTree.tree.find((n) => n.id === checkpointId);
+      const isPreRestructure = cpNode?.userMessage === 'pre-restructure';
+
+      if (isPreRestructure) {
+        try {
+          await fetch(`/api/workspaces/${workspaceId}/layers/restore-snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpointId }),
+          });
+        } catch {
+          // Best-effort — continue with studio restore even if layer restore fails
+        }
+      }
+
       const result = await cpTree.restore(workspaceId, sid, checkpointId);
       if (result) {
         // Restore checkpoint for graph resumption
@@ -702,7 +1017,11 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         // Clear interaction widget and animation state
         setInteractionPayload(undefined);
         setPatchAnimation(undefined);
-        toast.success(`Restored to turn ${result.turnNumber}`);
+        toast.success(
+          isPreRestructure
+            ? `Pre-restructure state restored (turn ${result.turnNumber})`
+            : `Restored to turn ${result.turnNumber}`
+        );
       } else {
         toast.error('Failed to restore checkpoint');
       }
@@ -816,19 +1135,71 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         )}
       </div>
       <div className="flex flex-1 overflow-hidden">
+        {/* Story 9.4 — Layer minimap aside panel */}
+        {minimapOpen && (
+          <aside className="w-56 shrink-0 border-r border-border bg-background flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <span>Layers</span>
+              <button
+                type="button"
+                onClick={() => setMinimapOpen(false)}
+                className="hover:text-foreground transition-colors"
+                aria-label="Close layer minimap"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            <LayerMinimap workspaceId={workspaceId} />
+          </aside>
+        )}
+
         {/* Diagram panel */}
-        <div className="flex-1 overflow-hidden">
-          <DiagramPreviewPanel
-            diagramContent={diagramContent}
-            isStreaming={isStreaming}
-            patchAnimation={patchAnimation}
-            graph={currentGraphRef.current ?? undefined}
-            annotations={annotations}
-            isReviewRunning={isReviewRunning}
-            onGraphUpdate={handleGraphUpdate}
-            onSummaryMessage={handleSummaryMessage}
-            workspaceId={workspaceId}
-          />
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {/* Story 9.3/9.4 — Layer breadcrumb + back button + minimap toggle */}
+          <div className="flex items-center border-b border-border">
+            {layerStack.length > 1 && (
+              <button
+                type="button"
+                onClick={() => void handlePopLayer()}
+                className="flex items-center gap-1 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors hover:bg-accent/50 border-r border-border flex-shrink-0"
+                aria-label="Back to parent layer"
+              >
+                ← Back
+              </button>
+            )}
+            <div className="flex-1">{layerStack.length > 1 && <LayerBreadcrumb />}</div>
+            <button
+              type="button"
+              onClick={() => setMinimapOpen((v) => !v)}
+              className={[
+                'p-2 rounded hover:bg-muted transition-colors flex-shrink-0 mr-1',
+                minimapOpen ? 'bg-muted text-primary' : 'text-muted-foreground',
+              ].join(' ')}
+              title="Toggle layer minimap"
+              aria-label="Toggle layer minimap"
+            >
+              <Map className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <DiagramPreviewPanel
+              diagramContent={diagramContent}
+              isStreaming={isStreaming}
+              patchAnimation={patchAnimation}
+              graph={currentGraphRef.current ?? undefined}
+              annotations={annotations}
+              validationWarnings={validationWarnings}
+              isReviewRunning={isReviewRunning}
+              onDiagramAction={handleDiagramAction}
+              onGraphUpdate={handleGraphUpdate}
+              onSummaryMessage={handleSummaryMessage}
+              workspaceId={workspaceId}
+              onNavigateToLayer={handleNavigateToLayer}
+              currentLayerGraphId={
+                layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : undefined
+              }
+            />
+          </div>
         </div>
 
         {/* Live Review Panel */}
@@ -842,6 +1213,44 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           />
         </div>
       </div>
+
+      {/* Story 9.5 — Port Editor modal */}
+      {portEditorLayerId && (
+        <PortEditor
+          layerId={portEditorLayerId}
+          workspaceId={workspaceId}
+          graph={currentGraphRef.current ?? undefined}
+          onClose={() => {
+            // Story 10.3: schedule contract validation after port editor closes (ports may have changed)
+            const parentGraph = currentGraphRef.current;
+            if (parentGraph) {
+              scheduleContractValidation(portEditorLayerId, parentGraph);
+            }
+            setPortEditorLayerId(null);
+            setPortEditorInitialPorts(undefined);
+          }}
+          initialPorts={portEditorInitialPorts}
+        />
+      )}
+
+      {/* Story 10.2 — Port Inference Preview modal */}
+      {portInferenceState && (
+        <PortInferencePreview
+          layerId={portInferenceState.layerId}
+          workspaceId={workspaceId}
+          inferenceResult={portInferenceState.result}
+          onAccept={() => {
+            setPortInferenceState(null);
+          }}
+          onModify={(ports) => {
+            const layerId = portInferenceState.layerId;
+            setPortInferenceState(null);
+            setPortEditorInitialPorts(ports);
+            setPortEditorLayerId(layerId);
+          }}
+          onReject={() => setPortInferenceState(null)}
+        />
+      )}
     </div>
   );
 }

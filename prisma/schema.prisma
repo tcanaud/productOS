@@ -38,6 +38,7 @@ model Workspace {
   session         WorkspaceSession?
   canvasArtifacts CanvasArtifact[]
   studios         Studio[]
+  layerGraphs     LayerGraph[]
 }
 
 model WorkspaceSession {
@@ -214,4 +215,29 @@ model CanvasConnection {
   createdAt DateTime       @default(now())
   source    CanvasArtifact @relation("ConnectionSource", fields: [sourceId], references: [id], onDelete: Cascade)
   target    CanvasArtifact @relation("ConnectionTarget", fields: [targetId], references: [id], onDelete: Cascade)
+}
+
+// ── LayerGraph model (Story 9.1) ──────────────────────────────────────────────
+
+model LayerGraph {
+  id            String      @id @default(cuid())
+  workspaceId   String
+  name          String
+  description   String?
+  parentNodeId  String?
+  parentGraphId String?
+  depth         Int         @default(0)
+  ports         Json        @default("[]")
+  graph         Json        @default("{}")
+  summary       String?
+  deletedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    LayerGraph?  @relation("LayerTree", fields: [parentGraphId], references: [id])
+  children  LayerGraph[] @relation("LayerTree")
+
+  @@index([workspaceId])
+  @@index([parentGraphId])
 }

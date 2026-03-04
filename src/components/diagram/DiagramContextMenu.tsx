@@ -25,7 +25,13 @@ export type DiagramAction =
   | { type: 'expand-node'; nodeId: string }
   | { type: 'ask-node'; nodeId: string }
   | { type: 'simplify-node'; nodeId: string }
-  | { type: 'view-review'; nodeId: string };
+  | { type: 'view-review'; nodeId: string }
+  // Story 9.3 — Layer navigation
+  | { type: 'zoom-into-layer'; nodeId: string; childGraphId: string }
+  // Story 9.5 — Port editor
+  | { type: 'edit-ports'; nodeId: string; layerId: string }
+  // Story 10.2 — Decompose into layer (triggers AI port inference)
+  | { type: 'decompose-to-layer'; nodeId: string; nodeLabel: string; parentGraphId: string };
 
 type NodeMenuProps = {
   type: 'node';
@@ -35,6 +41,12 @@ type NodeMenuProps = {
   onClose: () => void;
   /** Review annotations — used to show/hide the "View review details" item. */
   annotations?: Annotation[];
+  /** If set, the node is composite and this is its child layer ID (Story 9.3). */
+  childGraphId?: string;
+  /** Story 10.2: ID of the parent LayerGraph (needed for port inference after decompose). */
+  parentGraphId?: string;
+  /** Story 10.2: label of the node (needed to create the child layer name). */
+  nodeLabel?: string;
 };
 
 type EdgeMenuProps = {
@@ -115,6 +127,49 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
       >
         {props.type === 'node' && (
           <div className="flex flex-col py-1">
+            {/* Story 9.3 / 9.5 — Layer navigation + Port Editor (composite nodes only) */}
+            {props.childGraphId && (
+              <>
+                <MenuItem
+                  label="Zoom into layer"
+                  onClick={() =>
+                    handleAction({
+                      type: 'zoom-into-layer',
+                      nodeId: props.nodeId,
+                      childGraphId: props.childGraphId!,
+                    })
+                  }
+                />
+                <MenuItem
+                  label="Edit Ports…"
+                  onClick={() =>
+                    handleAction({
+                      type: 'edit-ports',
+                      nodeId: props.nodeId,
+                      layerId: props.childGraphId!,
+                    })
+                  }
+                />
+                <MenuSeparator />
+              </>
+            )}
+            {/* Story 10.2 — Decompose into layer (only for non-composite nodes) */}
+            {!props.childGraphId && props.parentGraphId && (
+              <>
+                <MenuItem
+                  label="Decompose into layer…"
+                  onClick={() =>
+                    handleAction({
+                      type: 'decompose-to-layer',
+                      nodeId: props.nodeId,
+                      nodeLabel: props.nodeLabel ?? props.nodeId,
+                      parentGraphId: props.parentGraphId!,
+                    })
+                  }
+                />
+                <MenuSeparator />
+              </>
+            )}
             {/* Story 7.4 — AI-powered actions */}
             <MenuItem
               label="Expand into sub-flow"

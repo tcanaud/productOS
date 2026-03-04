@@ -539,6 +539,102 @@ describe('validateMermaidSyntax', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// json2mermaid — composite nodes (Story 9.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('json2mermaid — composite nodes (Story 9.2)', () => {
+  it('appends :::composite class to nodes with type "composite"', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [
+        { id: 'A', label: 'Normal Node' },
+        { id: 'B', label: 'Composite Node', type: 'composite', childGraphId: 'layer-123' },
+      ],
+      edges: [],
+    };
+    const syntax = json2mermaid(graph);
+    expect(syntax).toContain(':::composite');
+    // Normal node should NOT have :::composite
+    const lines = syntax.split('\n');
+    const lineA = lines.find((l) => l.includes('"Normal Node"'));
+    expect(lineA).not.toContain(':::composite');
+    const lineB = lines.find((l) => l.includes('"Composite Node"'));
+    expect(lineB).toContain(':::composite');
+  });
+
+  it('emits classDef composite when at least one composite node exists', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [{ id: 'C', label: 'Child', type: 'composite', childGraphId: 'layer-abc' }],
+      edges: [],
+    };
+    const syntax = json2mermaid(graph);
+    expect(syntax).toContain(
+      'classDef composite fill:#f0f4ff,stroke:#4f46e5,stroke-width:3px,stroke-dasharray:5 5'
+    );
+  });
+
+  it('does NOT emit classDef composite when no composite nodes exist', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [
+        { id: 'A', label: 'Alpha' },
+        { id: 'B', label: 'Beta' },
+      ],
+      edges: [{ from: 'A', to: 'B' }],
+    };
+    const syntax = json2mermaid(graph);
+    expect(syntax).not.toContain('classDef composite');
+  });
+
+  it('emits classDef composite only once even with multiple composite nodes', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [
+        { id: 'A', label: 'Layer A', type: 'composite', childGraphId: 'g1' },
+        { id: 'B', label: 'Layer B', type: 'composite', childGraphId: 'g2' },
+      ],
+      edges: [],
+    };
+    const syntax = json2mermaid(graph);
+    const occurrences = (syntax.match(/classDef composite/g) ?? []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it('output with composite nodes passes validateMermaidSyntax', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [
+        { id: 'start', label: 'Start', shape: 'circle' },
+        { id: 'layer', label: 'Auth Layer', type: 'composite', childGraphId: 'layer-auth' },
+      ],
+      edges: [{ from: 'start', to: 'layer' }],
+    };
+    const syntax = json2mermaid(graph);
+    expect(validateMermaidSyntax(syntax).valid).toBe(true);
+  });
+
+  it('non-composite nodes are unaffected by composite feature', () => {
+    const graph: JsonGraph = {
+      diagramType: 'flowchart',
+      nodes: [
+        { id: 'A', label: 'Start', shape: 'circle' },
+        { id: 'B', label: 'Process', shape: 'rect' },
+        { id: 'C', label: 'End', shape: 'circle' },
+      ],
+      edges: [
+        { from: 'A', to: 'B' },
+        { from: 'B', to: 'C' },
+      ],
+    };
+    const syntax = json2mermaid(graph);
+    expect(syntax).not.toContain(':::composite');
+    expect(syntax).not.toContain('classDef composite');
+    expect(validateMermaidSyntax(syntax).valid).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // json2mermaid — error handling
 // ─────────────────────────────────────────────────────────────────────────────
 

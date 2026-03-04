@@ -68,13 +68,10 @@ export function CheckpointTimeline({
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }, [headId]);
 
-  const handleContextMenu = useCallback(
-    (e: React.MouseEvent, checkpointId: string) => {
-      e.preventDefault();
-      setContextMenu({ x: e.clientX, y: e.clientY, checkpointId });
-    },
-    []
-  );
+  const handleContextMenu = useCallback((e: React.MouseEvent, checkpointId: string) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, checkpointId });
+  }, []);
 
   if (tree.length === 0) return null;
 
@@ -90,9 +87,7 @@ export function CheckpointTimeline({
               {/* Branch label */}
               <span
                 className={`text-[10px] font-medium w-14 shrink-0 truncate ${
-                  branchName === activeBranch
-                    ? 'text-foreground'
-                    : 'text-muted-foreground'
+                  branchName === activeBranch ? 'text-foreground' : 'text-muted-foreground'
                 }`}
                 title={branchName}
               >
@@ -139,6 +134,13 @@ export function CheckpointTimeline({
                         `}
                       >
                         {node.turnNumber}
+                        {/* Story 11.2: pre-restructure badge */}
+                        {node.userMessage === 'pre-restructure' && (
+                          <span
+                            className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 border border-background"
+                            title="Pre-restructure snapshot"
+                          />
+                        )}
                       </button>
                     </div>
                   );

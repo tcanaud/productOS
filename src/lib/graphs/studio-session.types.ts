@@ -50,6 +50,11 @@ export interface StudioSessionState {
   personaMessages: PersonaMessage[];
   /** Synthesized questions + suggested answers from the roundtable section. */
   roundtable?: Roundtable;
+  // ── Story 10.1: Layer-awareness fields ────────────────────────────────────
+  /** ID of the LayerGraph being edited (null = root studio diagram). */
+  currentLayerId?: string | null;
+  /** Layer navigation stack (mirrors client-side layerStack). */
+  layerStack?: { graphId: string; label: string }[];
 }
 
 /**
