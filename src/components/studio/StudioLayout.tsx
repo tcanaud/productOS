@@ -28,9 +28,11 @@ import type { LiveReviewItem } from '@/lib/session/types';
 import { ReviewTaskPanel } from './ReviewTaskPanel';
 import { CheckpointTimeline } from './CheckpointTimeline';
 import { PortEditor } from './PortEditor';
+import { PortInferencePreview } from './PortInferencePreview';
 import { useCheckpointTree } from '@/hooks/useCheckpointTree';
 import type { StudioSessionState } from '@/lib/graphs/studio-session.types';
 import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
+import type { InferredPort, PortInferenceResult } from '@/lib/layer/port-inference';
 
 export type PersonaBubble = {
   personaId: string;
@@ -109,6 +111,14 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
 
   // Story 9.5 — Port editor state
   const [portEditorLayerId, setPortEditorLayerId] = useState<string | null>(null);
+  // Story 10.2 — Port inference state
+  const [portEditorInitialPorts, setPortEditorInitialPorts] = useState<InferredPort[] | undefined>(
+    undefined
+  );
+  const [portInferenceState, setPortInferenceState] = useState<{
+    layerId: string;
+    result: PortInferenceResult;
+  } | null>(null);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -503,13 +513,70 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     inputRef.current?.focus();
   }, []);
 
-  // Story 9.5 — Handle diagram actions from the context menu (non-AI branch)
-  const handleDiagramAction = useCallback((action: DiagramAction) => {
-    if (action.type === 'edit-ports') {
-      setPortEditorLayerId(action.layerId);
-    }
-    // Other non-AI actions can be handled here in future stories
-  }, []);
+  // Story 9.5 / 10.2 — Handle diagram actions from the context menu (non-AI branch)
+  const handleDiagramAction = useCallback(
+    async (action: DiagramAction) => {
+      if (action.type === 'edit-ports') {
+        setPortEditorInitialPorts(undefined);
+        setPortEditorLayerId(action.layerId);
+        return;
+      }
+
+      // Story 10.2 — Decompose node into a child layer, then run AI port inference
+      if (action.type === 'decompose-to-layer') {
+        const { nodeId, nodeLabel, parentGraphId } = action;
+        try {
+          // 1. Create the child layer
+          const createRes = await fetch(
+            `/api/workspaces/${workspaceId}/layers/${parentGraphId}/child`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: nodeLabel, parentNodeId: nodeId }),
+            }
+          );
+          if (!createRes.ok) {
+            const errData = (await createRes.json().catch(() => ({}))) as { error?: string };
+            toast.error(errData.error ?? 'Failed to create layer');
+            return;
+          }
+          const createData = (await createRes.json()) as { layer: { id: string } };
+          const childLayerId = createData.layer.id;
+
+          // 2. Run AI port inference
+          try {
+            const inferRes = await fetch(
+              `/api/workspaces/${workspaceId}/layers/${childLayerId}/infer-ports`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nodeId, parentGraphId }),
+              }
+            );
+            if (inferRes.ok) {
+              const inferData = (await inferRes.json()) as PortInferenceResult;
+              // 3. Show inference preview (non-destructive)
+              setPortInferenceState({ layerId: childLayerId, result: inferData });
+            } else {
+              // Graceful degradation: open PortEditor empty
+              setPortEditorInitialPorts(undefined);
+              setPortEditorLayerId(childLayerId);
+            }
+          } catch {
+            // Graceful degradation: open PortEditor empty
+            setPortEditorInitialPorts(undefined);
+            setPortEditorLayerId(childLayerId);
+          }
+        } catch {
+          toast.error('Failed to decompose node into layer');
+        }
+        return;
+      }
+
+      // Other non-AI actions can be handled here in future stories
+    },
+    [workspaceId]
+  );
 
   // Story 7.4: handle graph update from AI node actions (expand / simplify)
   const handleGraphUpdate = useCallback(
@@ -1036,6 +1103,9 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
               onSummaryMessage={handleSummaryMessage}
               workspaceId={workspaceId}
               onNavigateToLayer={handleNavigateToLayer}
+              currentLayerGraphId={
+                layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : undefined
+              }
             />
           </div>
         </div>
@@ -1058,7 +1128,30 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           layerId={portEditorLayerId}
           workspaceId={workspaceId}
           graph={currentGraphRef.current ?? undefined}
-          onClose={() => setPortEditorLayerId(null)}
+          onClose={() => {
+            setPortEditorLayerId(null);
+            setPortEditorInitialPorts(undefined);
+          }}
+          initialPorts={portEditorInitialPorts}
+        />
+      )}
+
+      {/* Story 10.2 — Port Inference Preview modal */}
+      {portInferenceState && (
+        <PortInferencePreview
+          layerId={portInferenceState.layerId}
+          workspaceId={workspaceId}
+          inferenceResult={portInferenceState.result}
+          onAccept={() => {
+            setPortInferenceState(null);
+          }}
+          onModify={(ports) => {
+            const layerId = portInferenceState.layerId;
+            setPortInferenceState(null);
+            setPortEditorInitialPorts(ports);
+            setPortEditorLayerId(layerId);
+          }}
+          onReject={() => setPortInferenceState(null)}
         />
       )}
     </div>

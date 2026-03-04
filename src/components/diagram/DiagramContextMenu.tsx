@@ -29,7 +29,9 @@ export type DiagramAction =
   // Story 9.3 — Layer navigation
   | { type: 'zoom-into-layer'; nodeId: string; childGraphId: string }
   // Story 9.5 — Port editor
-  | { type: 'edit-ports'; nodeId: string; layerId: string };
+  | { type: 'edit-ports'; nodeId: string; layerId: string }
+  // Story 10.2 — Decompose into layer (triggers AI port inference)
+  | { type: 'decompose-to-layer'; nodeId: string; nodeLabel: string; parentGraphId: string };
 
 type NodeMenuProps = {
   type: 'node';
@@ -41,6 +43,10 @@ type NodeMenuProps = {
   annotations?: Annotation[];
   /** If set, the node is composite and this is its child layer ID (Story 9.3). */
   childGraphId?: string;
+  /** Story 10.2: ID of the parent LayerGraph (needed for port inference after decompose). */
+  parentGraphId?: string;
+  /** Story 10.2: label of the node (needed to create the child layer name). */
+  nodeLabel?: string;
 };
 
 type EdgeMenuProps = {
@@ -141,6 +147,23 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
                       type: 'edit-ports',
                       nodeId: props.nodeId,
                       layerId: props.childGraphId!,
+                    })
+                  }
+                />
+                <MenuSeparator />
+              </>
+            )}
+            {/* Story 10.2 — Decompose into layer (only for non-composite nodes) */}
+            {!props.childGraphId && props.parentGraphId && (
+              <>
+                <MenuItem
+                  label="Decompose into layer…"
+                  onClick={() =>
+                    handleAction({
+                      type: 'decompose-to-layer',
+                      nodeId: props.nodeId,
+                      nodeLabel: props.nodeLabel ?? props.nodeId,
+                      parentGraphId: props.parentGraphId!,
                     })
                   }
                 />

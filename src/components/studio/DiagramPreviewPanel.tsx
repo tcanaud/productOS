@@ -43,6 +43,8 @@ export type DiagramPreviewPanelProps = {
   workspaceId?: string;
   /** Story 9.3 — Called when the user navigates into a composite node's child layer. */
   onNavigateToLayer?: (childGraphId: string, nodeLabel: string) => void;
+  /** Story 10.2 — ID of the current LayerGraph being viewed (passed to context menu for port inference). */
+  currentLayerGraphId?: string;
 };
 
 export function DiagramPreviewPanel({
@@ -57,6 +59,7 @@ export function DiagramPreviewPanel({
   onSummaryMessage,
   workspaceId,
   onNavigateToLayer,
+  currentLayerGraphId,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -121,6 +124,7 @@ export function DiagramPreviewPanel({
         onDiagramAction?.(action);
         return;
       }
+      // (expand-node, simplify-node, ask-node, view-review fall through to AI handling below)
 
       // Story 7.4 — AI-powered actions
       if (action.type === 'ask-node') {
@@ -312,6 +316,8 @@ export function DiagramPreviewPanel({
             graph?.nodes.find((n) => n.id === contextMenu.nodeId && n.type === 'composite')
               ?.childGraphId
           }
+          parentGraphId={currentLayerGraphId}
+          nodeLabel={graph?.nodes.find((n) => n.id === contextMenu.nodeId)?.label}
         />
       )}
       {contextMenu?.type === 'edge' && (

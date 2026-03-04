@@ -25,6 +25,8 @@ interface PortEditorProps {
   /** The graph of the parent diagram — used for edge-reference checks and contract validation. */
   graph?: JsonGraph;
   onClose: () => void;
+  /** Story 10.2: pre-populate from AI inference when provided and layer has no existing ports. */
+  initialPorts?: LayerPort[];
 }
 
 interface PendingRemove {
@@ -32,7 +34,13 @@ interface PendingRemove {
   refCount: number;
 }
 
-export function PortEditor({ layerId, workspaceId, graph, onClose }: PortEditorProps) {
+export function PortEditor({
+  layerId,
+  workspaceId,
+  graph,
+  onClose,
+  initialPorts,
+}: PortEditorProps) {
   const router = useRouter();
   const [ports, setPorts] = useState<LayerPort[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +53,7 @@ export function PortEditor({ layerId, workspaceId, graph, onClose }: PortEditorP
   const contractTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // -------------------------------------------------------------------------
-  // Load ports on mount
+  // Load ports on mount (Story 10.2: use initialPorts when layer has no ports)
   // -------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +63,13 @@ export function PortEditor({ layerId, workspaceId, graph, onClose }: PortEditorP
         if (!res.ok) throw new Error(`Server error ${res.status}`);
         const data = (await res.json()) as { layer: { ports: LayerPort[] } };
         if (!cancelled) {
-          setPorts((data.layer?.ports ?? []) as LayerPort[]);
+          const existingPorts = (data.layer?.ports ?? []) as LayerPort[];
+          // Story 10.2: if no existing ports and initialPorts provided, pre-populate
+          if (existingPorts.length === 0 && initialPorts && initialPorts.length > 0) {
+            setPorts(initialPorts);
+          } else {
+            setPorts(existingPorts);
+          }
         }
       } catch {
         toast.error('Failed to load ports');
@@ -67,7 +81,7 @@ export function PortEditor({ layerId, workspaceId, graph, onClose }: PortEditorP
     return () => {
       cancelled = true;
     };
-  }, [layerId, workspaceId]);
+  }, [layerId, workspaceId, initialPorts]);
 
   // -------------------------------------------------------------------------
   // Debounced PATCH (500ms)
