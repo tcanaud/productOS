@@ -24,7 +24,7 @@ import { buildOnboardingPrompt, determineOnboardingPhase } from '@/lib/ai/prompt
 import { buildPartyModePrompt } from '@/lib/ai/prompts/party-mode';
 import { buildRefinePrompt } from '@/lib/ai/prompts/refine-flow';
 import { selectPersonas } from '@/lib/personas/registry';
-import { parsePartyModeResponse } from '@/lib/personas/parser';
+import { parsePartyModeResponseFull } from '@/lib/personas/parser';
 import { applyPatch } from './patch-applier';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,8 +115,8 @@ export function computeContextScore(messages: StudioSessionState['messages']): n
 
   let score = 0;
 
-  // Number of user turns (max 30 pts, 7 pts each — ~4 turns to max)
-  score += Math.min(userMessages.length * 7, 30);
+  // Number of user turns (max 30 pts, 8 pts each — ~4 turns to max)
+  score += Math.min(userMessages.length * 8, 30);
 
   // Total user text length (max 30 pts, 1 pt per 30 chars)
   const totalLength = userMessages.reduce((s, m) => s + m.content.length, 0);
@@ -474,7 +474,8 @@ export function createStudioSessionGraph() {
         }
 
         const rawPartyResponse = state['multi-persona-respond']?.partyResponse ?? '';
-        const { personas: personaMessages, roundtable } = parsePartyModeResponse(rawPartyResponse);
+        const { personas: personaMessages, roundtable } =
+          parsePartyModeResponseFull(rawPartyResponse);
 
         return {
           kind: 'continue' as const,

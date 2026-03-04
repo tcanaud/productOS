@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { requireAuth } from '@/lib/auth-utils';
 import { withAI } from '@/lib/ai/middleware';
 import { runLiveReview } from '@/lib/ai/graphs/live-review.graph';
+import type { JsonGraph } from '@/lib/json2mermaid/types';
 import { getSessionDir } from '@/lib/session/session-scaffolder';
 import { readSessionBmadConfig } from '@/lib/session/config-reader';
 import { sessionManager } from '@/lib/session/session-manager';
@@ -54,9 +55,8 @@ async function handler(req: NextRequest, _userId: string): Promise<NextResponse>
   const sessionDir = getSessionDir(parsed.data.workspaceId);
   const bmadConfig = readSessionBmadConfig(sessionDir);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const annotations = await runLiveReview(
-    parsed.data.graph as any,
+    parsed.data.graph as unknown as JsonGraph,
     bmadConfig.communication_language
   );
 

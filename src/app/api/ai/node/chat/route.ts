@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireAuth } from '@/lib/auth-utils';
 import { withAI } from '@/lib/ai/middleware';
 import { runNodeChat } from '@/lib/ai/graphs/node-chat.graph';
+import type { JsonGraph } from '@/lib/json2mermaid/types';
 import { buildWorkspaceContext } from '@/lib/ai/context-injector';
 
 const RequestSchema = z.object({
@@ -68,9 +69,8 @@ async function handler(req: NextRequest, userId: string): Promise<NextResponse> 
       .join('\n\n');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await runNodeChat({
-    graph: graph as any,
+    graph: graph as unknown as JsonGraph,
     nodeId,
     nodeLabel,
     question,

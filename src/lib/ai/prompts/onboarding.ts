@@ -134,8 +134,8 @@ export function determineOnboardingPhase(
   contextScore: number,
   clarificationCount: number
 ): OnboardingPhase {
-  // Detailed input: can go straight to generate if context is sufficient AND enough rounds
-  if (wordCount > 100 && contextScore >= 50 && clarificationCount >= 2) {
+  // Detailed input: go straight to generate if context is sufficient
+  if (wordCount > 100 && contextScore >= 40) {
     return 'generate';
   }
 
@@ -144,8 +144,13 @@ export function determineOnboardingPhase(
     return 'generate';
   }
 
+  // Any input with enough exchanges and partial context: ask for confirmation
+  if (contextScore >= 40 && clarificationCount >= 2) {
+    return 'confirm';
+  }
+
   // Moderate/detailed input with some context: ask for confirmation
-  if (wordCount >= 50 && contextScore >= 40 && clarificationCount >= 2) {
+  if (wordCount >= 50 && contextScore >= 40 && clarificationCount >= 1) {
     return 'confirm';
   }
 

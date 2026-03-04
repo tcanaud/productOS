@@ -77,6 +77,9 @@ You MUST produce each persona's response separated by the delimiter on its own l
 
 Use EXACTLY these persona IDs in this order:
 ${personas.map((p) => p.id).join(', ')}
+
+Persona delimiters (base format):
+${personas.map((p) => `---PERSONA:${p.id}---`).join('\n')}
 ${emotionInstruction}
 ${crossReferenceInstruction}
 ${continuityInstruction}
