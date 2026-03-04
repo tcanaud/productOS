@@ -1,624 +1,532 @@
 ---
 stepsCompleted: [1, 2, 3]
-inputDocuments: [PRD-ProductOS-v1, Architecture-ProductOS-v1, Product-Vision-v2]
-lastUpdated: 2026-03-03
+inputDocuments: [architecture.md, product-vision.md]
 ---
 
-# ProductOS — Epic Breakdown (V1 + V2: Product Design Studio)
+# ProductOS - Epic Breakdown (Hierarchical Composable Layers)
 
 ## Overview
 
-This document provides the complete epic and story breakdown for ProductOS. Epics 0–5 cover the V1 Diagram-to-Spec Pipeline (completed). Epics 6–8 cover the V2 Product Design Studio — transforming ProductOS from a diagramming tool into a conversational product design operating system powered by multi-persona AI.
-
-See `product-vision.md` for the full strategic vision.
+This document provides the complete epic and story breakdown for the Hierarchical Composable Layers feature of ProductOS, decomposing the requirements from the Architecture Decision Document into implementable stories.
 
 ## Requirements Inventory
 
 ### Functional Requirements
 
-- FR-1: Workspace creation and management
-- FR-2: Mermaid diagram editing (text + visual preview)
-- FR-3: AI-powered flow generation from natural language
-- FR-4: AI multi-profile review (positive, moderate, critical)
-- FR-5: Automated spec generation from diagrams (PRD, stories, edge cases)
-- FR-6: Markdown export of generated specs
-- FR-7: Multi-persona chat for product design collaboration
-- FR-8: User authentication and session management
-- FR-9: Conversational product design studio with guided onboarding
-- FR-10: Multi-persona AI team (BMAD party mode) for design sessions
-- FR-11: Iterative diagram refinement via conversational JSON patches
-- FR-12: Real-time streaming communication (SSE) between AI and frontend
-- FR-13: Interactive SVG diagram with node-level actions
-- FR-14: Live review indicators (severity badges on nodes)
-- FR-15: Canvas spatial layout with positioned, connected artifacts
+- FR-L1: Composite nodes — a graph node that encapsulates a child graph (separate artifact)
+- FR-L2: Port contracts — typed I/O ports on composite nodes defining the interface between layers
+- FR-L3: Layer navigation — zoom into/out of composite nodes with breadcrumb and minimap
+- FR-L4: AI-aware layer context — claudegraph receives parent contracts + current graph + child contracts
+- FR-L5: Port management — AI-inferred ports from parent edges + manual user editing
+- FR-L6: AI structural refactoring — analyze flat graph → propose layer decomposition → negotiate → apply atomically
+- FR-L7: Contract validation — verify port consistency between parent and child graphs
+- FR-L8: Snapshot/restore — mandatory pre-refactoring checkpoint for safe rollback
 
 ### Non-Functional Requirements
 
-- NFR-1: Diagram generation < 3s
-- NFR-2: AI response < 5s (p95)
-- NFR-3: Workspace loading < 2s
-- NFR-4: Autosave every 5s (all artifacts)
-- NFR-5: Version history on all artifacts
-- NFR-6: Consistent API error handling and validation
-- NFR-7: AI rate limiting and cost tracking
-- NFR-8: AI persona response < 10s (p95) via claudegraph + Claude CLI
-- NFR-9: Patch animation smooth at 60fps
-- NFR-10: Session state persists between conversations per workspace
+- NFR-L1: Layer navigation transition < 400ms (animated zoom feel)
+- NFR-L2: AI context window for layers capped at 2 ancestor levels (contracts only) to control prompt size
+- NFR-L3: Cycle detection on composite node creation (prevent circular layer references)
+- NFR-L4: Soft-delete on composite node removal (preserve child graph artifacts)
+- NFR-L5: Refactoring preview must be non-destructive until user confirms
 
 ### Additional Requirements
 
-- AR-1: json2mermaid internal module (JSON graph → valid Mermaid syntax)
-- AR-2: Structured AI outputs only (JSON, never free text to Mermaid directly)
-- AR-3: Docker Compose dev environment (Postgres, Redis, app)
-- AR-4: Project bootstrap (Next.js, TypeScript, Prisma, linting)
-- AR-5: Application shell and design system foundation
-- AR-6: Testing infrastructure (Vitest, RTL, AI mocks)
-- AR-7: Shared AI client and orchestration layer
-- AR-8: claudegraph integration (graph-based AI workflows with Claude CLI)
-- AR-9: BMAD framework installed in Docker container for party mode skills
-- AR-10: Per-workspace BMAD session isolation (filesystem + DB hybrid)
-- AR-11: InteractionNode support in claudegraph for user-in-the-loop graphs
+- AR-L1: LayerGraph Prisma model with self-referencing tree structure (D1)
+- AR-L2: Ports stored as JSON on LayerGraph, validation application-side (D2)
+- AR-L3: Hybrid navigation — client Zustand + URL param + context sent per request (D3)
+- AR-L4: Composite rendering via Mermaid classDef + SVG post-processing badges (D4)
+- AR-L5: Progressive AI context summarization with cache (D5)
+- AR-L6: Dedicated claudegraph restructure-layers.graph (D6)
+- AR-L7: Checkpoint system reuse for snapshot/restore (D7)
+- AR-L8: Async contract validation with non-blocking warnings — live-review pattern (D8)
+- AR-L9: Soft limits — depth: 6, ports: 10, nodes: 50, composites: 15 (D9)
+- AR-L10: Cycle detection via ancestor chain walking, max 6 iterations (D10)
+- AR-L11: Clean migration — table rase, no old data migration
+- AR-L12: New module src/lib/layer/ with 6 files (types, service, context-builder, cycle-detector, contract-validator, summary-generator)
 
 ### FR Coverage Map
 
-| Requirement | Epic   | Stories                           |
-| ----------- | ------ | --------------------------------- |
-| FR-1        | Epic 1 | 1.1                               |
-| FR-2        | Epic 2 | 2.1                               |
-| FR-3        | Epic 2 | 2.2                               |
-| FR-4        | Epic 3 | 3.1                               |
-| FR-5        | Epic 4 | 4.1                               |
-| FR-6        | Epic 4 | 4.2                               |
-| FR-7        | Epic 5 | 5.1                               |
-| FR-8        | Epic 0 | 0.2                               |
-| AR-1        | Epic 2 | 2.2 (spike dependency)            |
-| AR-2        | Epic 2 | 2.0 (structured output utilities) |
-| AR-3        | Epic 1 | 1.2                               |
-| AR-4        | Epic 0 | 0.1                               |
-| AR-5        | Epic 0 | 0.3                               |
-| AR-6        | Epic 0 | 0.4                               |
-| AR-7        | Epic 2 | 2.0                               |
-| FR-9        | Epic 6 | 6.1, 6.3                          |
-| FR-10       | Epic 6 | 6.4                               |
-| FR-11       | Epic 6 | 6.5                               |
-| FR-12       | Epic 6 | 6.6                               |
-| FR-13       | Epic 7 | 7.1, 7.4                          |
-| FR-14       | Epic 7 | 7.3                               |
-| FR-15       | Epic 8 | 8.1, 8.2, 8.3                     |
-| AR-8        | Epic 6 | 6.2 (claudegraph session graph)   |
-| AR-9        | Epic 6 | 6.4 (BMAD in Docker)              |
-| AR-10       | Epic 6 | 6.7                               |
-| AR-11       | Epic 6 | 6.2                               |
+| Requirement | Epic        | Description                                      |
+| ----------- | ----------- | ------------------------------------------------ |
+| FR-L1       | Epic 9      | Composite nodes in graph                         |
+| FR-L2       | Epic 9      | Port contracts I/O                               |
+| FR-L3       | Epic 9      | Layer navigation (zoom, breadcrumb, minimap)     |
+| FR-L4       | Epic 10     | AI-aware layer context                           |
+| FR-L5       | Epic 9 + 10 | Manual port editing (9) + AI port inference (10) |
+| FR-L6       | Epic 11     | AI structural refactoring                        |
+| FR-L7       | Epic 10     | Contract validation                              |
+| FR-L8       | Epic 11     | Snapshot/restore                                 |
+| NFR-L1      | Epic 9      | Transition < 400ms                               |
+| NFR-L2      | Epic 10     | Context cap 2 levels                             |
+| NFR-L3      | Epic 9      | Cycle detection                                  |
+| NFR-L4      | Epic 9      | Soft-delete                                      |
+| NFR-L5      | Epic 11     | Non-destructive preview                          |
 
 ## Epic List
 
-0. **Epic 0: Foundations** — Project bootstrap, auth, app shell, testing infra
-1. **Epic 1: Product Workspace** — Workspace CRUD, dev environment, navigation
-2. **Epic 2: Living Diagrams** — AI client foundation, Mermaid editor, AI generation via json2mermaid
-3. **Epic 3: AI Review** — Multi-profile diagram analysis
-4. **Epic 4: Spec Generator** — Automated PRD, stories, edge cases + export
-5. **Epic 5: Product Design Chat** — Multi-persona conversational collaboration
-6. **Epic 6: Product Design Studio** — Conversational AI studio with multi-persona BMAD team, session graphs, and iterative refinement
-7. **Epic 7: Interactive Diagram** — Clickable SVG, patch animations, live review indicators, node context menus
-8. **Epic 8: Canvas Spatial (V2)** — Free-form canvas with positioned artifacts and visual connections
+9. **Epic 9: Hierarchical Graph Foundation** — LayerGraph data model, composite nodes, port contracts, layer navigation with breadcrumb and minimap, cycle detection, soft limits
+10. **Epic 10: AI-Aware Layers** — AI layer context builder, progressive summarization with cache, AI port inference, async contract validation with warnings
+11. **Epic 11: AI Structural Refactoring** — Dedicated restructure claudegraph, clustering proposal/negotiation, checkpoint-based snapshot/restore, bottom-up/top-down/hybrid modes
 
----
+## Epic 9: Hierarchical Graph Foundation
 
-## Epic 6: Product Design Studio
+**Goal:** Establish the data model, rendering, navigation, and manual editing foundation for hierarchical composable layers — enabling users to create composite nodes, navigate between layers, and manage port contracts.
 
-**Goal:** Replace the linear diagram editor with a conversational AI studio where a team of expert personas guides the user from idea to validated flow through natural dialogue, powered by BMAD party mode running natively via claudegraph.
+### Story 9.1: LayerGraph Data Model and CRUD API
 
-**Sprint:** Sprint 3
-
-**Dependencies:** Epic 2 (diagrams + json2mermaid), Epic 5 (multi-persona infra), AR-8 (claudegraph), AR-9 (BMAD in Docker)
-
-### Story 6.1: Studio Layout & Onboarding UX
-
-As a Product Manager,
-I want a welcoming studio interface with a conversation panel and diagram preview,
-so that I can start designing my product through natural conversation instead of writing code.
+As a developer,
+I want a LayerGraph Prisma model with self-referencing tree structure and CRUD API routes,
+So that composite layers can be persisted, queried, and managed as a hierarchical tree.
 
 **Acceptance Criteria:**
 
-**Given** a PM opens a workspace
-**When** they enter the studio
-**Then** a split-view layout shows a conversation panel (left, ~40%) and a diagram preview area (right, ~60%)
+**Given** the Prisma schema has no LayerGraph model
+**When** the migration runs
+**Then** a `LayerGraph` table is created with fields: `id`, `workspaceId`, `name`, `description`, `parentNodeId`, `parentGraphId`, `depth`, `ports` (JSON, default `[]`), `graph` (JSON, default `{}`), `summary`, `deletedAt`, `createdAt`, `updatedAt`
+**And** a self-relation `LayerTree` links `parentGraphId` to `id`
 
-**Given** a PM arrives on an empty workspace
-**When** the studio loads
-**Then** a welcoming prompt invites them to describe their idea, with inspirational suggestion chips (e.g. "E-commerce checkout flow", "User onboarding flow")
+**Given** a workspace exists
+**When** `POST /api/workspaces/[id]/layers` is called with `{ name }` body
+**Then** a root LayerGraph (depth 0, no parent) is created and returned
 
-**Given** a PM clicks a suggestion chip
-**When** the chip is selected
-**Then** the text is pre-filled in the conversation input and ready to send
+**Given** a LayerGraph exists
+**When** `POST /api/workspaces/[id]/layers/[layerId]/child` is called with `{ name, parentNodeId }`
+**Then** a child LayerGraph is created with `depth = parent.depth + 1`, `parentGraphId` set, and `parentNodeId` referencing the composite node in the parent's graph
 
-**Given** the studio is active
-**When** the PM types and sends a message
-**Then** the conversation panel displays the message and shows a loading state while the AI responds
+**Given** a LayerGraph exists
+**When** `GET /api/workspaces/[id]/layers/[layerId]` is called
+**Then** the layer graph is returned with its ports and graph data
 
-### Story 6.2: Studio Session Graph (claudegraph)
+**Given** a LayerGraph exists
+**When** `PATCH /api/workspaces/[id]/layers/[layerId]` is called with updated fields
+**Then** the layer is updated and `summary` is set to null (cache invalidation)
 
-As a Developer,
-I want a claudegraph `studio-session.graph` that orchestrates the entire design conversation with InteractionNodes for user dialogue,
-so that the AI conversation flow is structured, testable, and maintainable.
+**Given** a LayerGraph exists
+**When** `DELETE /api/workspaces/[id]/layers/[layerId]` is called
+**Then** the layer is soft-deleted (`deletedAt` set to now) instead of hard-deleted (NFR-L4)
 
-**Acceptance Criteria:**
+**Given** a child LayerGraph creation request
+**When** the candidate child would create a cycle (appears in ancestor chain)
+**Then** the API returns a 400 error with a cycle detection message (NFR-L3)
+**And** the ancestor chain walk is limited to 6 iterations (depth cap)
 
-**Given** a studio session starts
-**When** the graph is initialized
-**Then** it enters the `parse-user-input` node and routes based on context analysis
+**Given** a workspace exists
+**When** `GET /api/workspaces/[id]/layers` is called
+**Then** all non-deleted root layers are returned with their tree structure
 
-**Given** the graph reaches an InteractionNode
-**When** it needs user input
-**Then** the graph pauses execution, emits the question/prompt to the frontend, and waits for the user's response before continuing
+**Given** soft limits defined (depth ≤ 6, ports ≤ 10, nodes ≤ 50, composites ≤ 15)
+**When** a creation or update exceeds a soft limit
+**Then** a warning is returned in the response (non-blocking) but the operation succeeds (AR-L9)
 
-**Given** the graph determines sufficient context exists
-**When** the `enough-context?` FnNode evaluates
-**Then** it routes to the `generate` LLMNode to produce a diagram
+**Technical Notes:**
 
-**Given** the user sends a refinement instruction
-**When** the graph routes to the `refine` LLMNode
-**Then** it produces a JSON patch (addNodes, removeNodes, addEdges, removeEdges, modifyNodes) instead of a full regeneration
+- New module: `src/lib/layer/types.ts`, `layer-service.ts`, `cycle-detector.ts`
+- API routes: `src/app/api/workspaces/[id]/layers/` (route.ts, [layerId]/route.ts, [layerId]/child/route.ts)
+- Clean migration: drop old data (AR-L11)
+- Requirements: FR-L1, FR-L2, NFR-L3, NFR-L4, AR-L1, AR-L2, AR-L9, AR-L10, AR-L11, AR-L12
 
-**Given** the user validates the diagram
-**When** they confirm
-**Then** the graph routes to `persist` and terminates gracefully
+### Story 9.2: Composite Node Rendering
 
-**Technical Note:**
-
-- Graph flow: `[parse-input] → [select-personas] → [multi-persona-respond (LLMNode)] → [present-to-user (InteractionNode)] → [route] → loop or END`
-- InteractionNodes use claudegraph's native interaction API
-- Session state maintained by GraphRunner between interactions
-
-### Story 6.3: Conversational Onboarding
-
-As a Product Manager,
-I want the AI to ask me smart, adaptive questions to understand my product idea before generating a diagram,
-so that the generated flow is relevant and well-structured from the start.
+As a user,
+I want composite nodes to be visually distinct in the diagram with a layer indicator badge,
+So that I can immediately identify which nodes contain child layers.
 
 **Acceptance Criteria:**
 
-**Given** a PM provides a brief description (< 50 words)
-**When** the AI processes it
-**Then** it asks 2-3 targeted clarification questions (actors, happy path, key constraints)
+**Given** a JsonGraph contains a node with `type: "composite"` and `childGraphId`
+**When** `json2mermaid` converts the graph to Mermaid syntax
+**Then** the node receives a `:::composite` class
+**And** a `classDef composite fill:#f0f4ff,stroke:#4f46e5,stroke-width:3px,stroke-dasharray:5 5` is emitted
 
-**Given** a PM provides a detailed description (> 100 words with clear actors and flow)
-**When** the AI processes it
-**Then** it may skip clarification and proceed directly to diagram generation with at most 1 confirmation question
+**Given** a Mermaid diagram contains composite-classed nodes
+**When** the SVG is rendered and post-processed by badge-renderer
+**Then** a layer indicator icon/badge is injected on composite nodes (similar to existing review badges)
 
-**Given** the AI asks a question
-**When** the PM responds
-**Then** the AI acknowledges the response contextually and either asks a follow-up or proceeds to generation
+**Given** a composite node in the diagram
+**When** the user hovers over it
+**Then** the composite styling is enhanced (cursor pointer, glow effect) indicating it's interactive
 
-**Given** the conversation reaches sufficient context
-**When** the AI generates the diagram
-**Then** it announces "I see the flow forming" and the diagram appears progressively in the preview
+**Given** the existing `GraphNode` interface
+**When** a composite node is represented
+**Then** it has `type: "composite"` and `childGraphId: string` fields added to the interface
 
-### Story 6.4: Multi-Persona AI Team (BMAD Party Mode)
+**Technical Notes:**
 
-As a Product Manager,
-I want to interact with distinct expert personas (Product Strategist, System Designer, User Advocate, etc.) during my design session,
-so that I get diverse, specialized perspectives on my product design.
+- Modify: `src/lib/json2mermaid/index.ts` (add classDef + :::composite)
+- Modify: `src/lib/svg/badge-renderer.ts` (add layer indicator badge)
+- Modify: `src/components/diagram/MermaidPreview.tsx` (composite hover CSS)
+- Update GraphNode type in json2mermaid types
+- Requirements: FR-L1, AR-L4
 
-**Acceptance Criteria:**
+### Story 9.3: Layer Navigation with Breadcrumb
 
-**Given** a studio session is active
-**When** the AI responds
-**Then** 2-3 relevant personas respond with distinct names, icons, and communication styles
-
-**Given** the user's message is about technical architecture
-**When** personas are selected
-**Then** the System Designer persona is prioritized with complementary perspectives
-
-**Given** a persona responds
-**When** the response is displayed
-**Then** it shows the persona's display name, icon, and styled message bubble with the persona's color
-
-**Given** an ongoing conversation
-**When** personas respond
-**Then** they can reference each other naturally (e.g. "Building on what the Strategist said...")
-
-**Technical Note:**
-
-- BMAD must be installed in the Docker container home directory
-- Claude CLI spawned by claudegraph loads `/bmad-party-mode` skill natively
-- The LLMNode prompt includes workspace context + `/bmad-party-mode` command
-- `.claude/settings.json` must be present in the container for skill resolution
-- Persona display mapping: BMAD agent names → Studio-friendly titles (John→"Product Strategist", Winston→"System Designer", etc.)
-
-### Story 6.5: Iterative Diagram Refinement via Chat
-
-As a Product Manager,
-I want to modify my diagram through natural language instructions in the chat,
-so that I can iterate on my design without touching code.
+As a user,
+I want to double-click a composite node to zoom into its child layer and navigate back via a breadcrumb,
+So that I can explore the hierarchical structure of my graph intuitively.
 
 **Acceptance Criteria:**
 
-**Given** a PM has a generated diagram
-**When** they type "Add an error flow after payment"
-**Then** the AI produces a JSON patch that adds the relevant nodes and edges
-**And** the diagram updates visually with the new elements
+**Given** a composite node is displayed in the diagram
+**When** the user double-clicks on it
+**Then** the view transitions to the child LayerGraph (animated transition < 400ms, NFR-L1)
+**And** the URL updates to include `?layer={childGraphId}`
+**And** the Zustand layer navigation store is updated (`pushLayer`)
 
-**Given** a PM types "Remove the notification step"
-**When** the patch is applied
-**Then** the specified node and its connected edges are removed from the diagram
+**Given** the user is navigated into a child layer
+**When** the LayerBreadcrumb component renders
+**Then** it displays the full path from root to current layer (e.g., "Root > Marketing > Campaign Flow")
+**And** each segment is clickable to jump to that layer
 
-**Given** a PM types "Rename 'Checkout' to 'Payment Processing'"
-**When** the patch is applied
-**Then** the node label is updated in the diagram
+**Given** the user clicks on a breadcrumb segment
+**When** the click is registered
+**Then** the view navigates to the selected layer (`jumpToLayer`)
+**And** the layerStack is trimmed to match the new position
+**And** the URL updates accordingly
 
-**Given** any refinement instruction
-**When** the AI processes it
-**Then** it returns a JSON patch (not a full regeneration) and the diagram animates the changes
+**Given** the user is in a child layer
+**When** they click the back/pop action
+**Then** the view transitions back to the parent layer (`popLayer`)
+**And** the URL updates to the parent layer ID
 
-**Technical Note:**
+**Given** the page is loaded with `?layer=xyz` in the URL
+**When** the page initializes
+**Then** the Zustand store reconstructs the layerStack from the DB (walking parentGraphId chain)
+**And** the correct layer is displayed
 
-- Patch format: `{ addNodes[], removeNodes[], addEdges[], removeEdges[], modifyNodes[] }`
-- Patches applied to the JsonGraph (source of truth), then re-rendered via `json2mermaid`
-- The `refine-flow.graph` receives current JsonGraph + user instruction → returns patch
+**Given** the "Zoom into layer" action is added to DiagramContextMenu
+**When** the user right-clicks a composite node and selects "Zoom into layer"
+**Then** it behaves identically to double-click navigation
 
-### Story 6.6: SSE/Streaming Communication
+**Technical Notes:**
 
-As a Developer,
-I want real-time Server-Sent Events (SSE) streaming between the studio graph and the frontend,
-so that persona responses and diagram updates appear progressively without polling.
+- New: `src/hooks/useLayerNavigation.ts` (Zustand store)
+- New: `src/components/studio/LayerBreadcrumb.tsx`
+- Modify: `src/components/studio/StudioLayout.tsx` (integrate breadcrumb, layer routing)
+- Modify: `src/components/studio/DiagramPreviewPanel.tsx` (double-click composite → navigate)
+- Modify: `src/components/studio/DiagramContextMenu.tsx` (add "Zoom into layer" action)
+- Requirements: FR-L3, NFR-L1, AR-L3
 
-**Acceptance Criteria:**
+### Story 9.4: Layer Minimap
 
-**Given** a studio session is active
-**When** the graph produces output (persona message, diagram update, interaction prompt)
-**Then** the event is streamed to the frontend via SSE within 100ms
-
-**Given** the SSE connection drops
-**When** the frontend detects disconnection
-**Then** it automatically reconnects and resumes from the last event ID
-
-**Given** multiple events are emitted rapidly
-**When** the frontend receives them
-**Then** they are processed in order and rendered sequentially with appropriate timing
-
-**Event Types:**
-
-- `persona-message`: `{ persona, displayName, icon, message }`
-- `interaction`: `{ question, inputType, options? }`
-- `diagram-update`: `{ patch }` (incremental)
-- `diagram-full`: `{ jsonGraph, mermaidSyntax }` (initial generation)
-- `review-annotation`: `{ nodeId, severity, message }`
-- `session-end`: `{ summary }`
-
-### Story 6.7: BMAD Session Isolation (Per Workspace)
-
-As a Product Manager,
-I want my AI design sessions to remember previous conversations and decisions within a workspace,
-so that I can continue where I left off and the AI team retains project context.
+As a user,
+I want a minimap showing the full tree structure of my layers with my current position highlighted,
+So that I can understand the overall hierarchy and quickly jump to any layer.
 
 **Acceptance Criteria:**
 
-**Given** a PM starts a studio session in a workspace
-**When** the session initializes
-**Then** a BMAD session directory is created (or loaded) at `data/sessions/{workspaceId}/` with `_bmad/` structure
+**Given** a workspace has LayerGraphs forming a tree
+**When** the LayerMinimap component renders
+**Then** it displays the tree structure with node names
+**And** the current layer is visually highlighted (e.g., bold, different color)
+**And** composite nodes with children are shown with expand/collapse indicators
 
-**Given** a PM returns to a workspace after days of inactivity
-**When** they open the studio
-**Then** the AI team references previous conversations and decisions from BMAD memory files
+**Given** the minimap is displayed
+**When** the user clicks on any layer node in the minimap
+**Then** the view navigates to that layer (using `jumpToLayer`)
+**And** the breadcrumb and URL update accordingly
 
-**Given** a studio session produces artifacts (diagram iterations, review notes)
-**When** the session ends
-**Then** session metadata is persisted in Prisma (WorkspaceSession model) and BMAD files are written to the filesystem
+**Given** the tree has more than 3 levels of depth
+**When** the minimap renders
+**Then** deep branches are collapsed by default
+**And** the path to the current layer is always expanded
 
-**Given** a workspace is deleted
-**When** cleanup runs
-**Then** the associated session directory is removed from the filesystem
+**Given** the minimap is integrated into StudioLayout
+**When** the user toggles it
+**Then** it appears as a sidebar panel that can be shown/hidden
+**And** it does not interfere with the existing conversation/diagram panels
 
-**Technical Note:**
+**Technical Notes:**
 
-- DB (Prisma): `WorkspaceSession` model with workspaceId, activeAgents[], lastActivity, state
-- Filesystem: `data/sessions/{workspaceId}/_bmad/` with full BMAD structure
-- Claude CLI CWD set to the session directory so it loads local BMAD config
-- Future: S3 sync for inactive session depopulation with on-demand rehydration
+- New: `src/components/studio/LayerMinimap.tsx`
+- Modify: `src/components/studio/StudioLayout.tsx` (integrate minimap toggle)
+- Fetches tree via `GET /api/workspaces/[id]/layers`
+- Uses `useLayerNavigation` hook from Story 9.3
+- Requirements: FR-L3, AR-L3
 
----
+### Story 9.5: Port Editor
 
-## Epic 7: Interactive Diagram
-
-**Goal:** Transform the static Mermaid preview into an interactive, animated SVG where users can click nodes, see live review indicators, and interact directly with diagram elements.
-
-**Sprint:** Sprint 4
-
-**Dependencies:** Story 6.1 (studio layout), Story 6.5 (patch system)
-
-### Story 7.1: Interactive SVG Diagram
-
-As a Product Manager,
-I want to click on nodes and edges in my diagram to trigger contextual actions,
-so that I can interact with my design visually instead of only through chat.
+As a user,
+I want to manually add, edit, and remove I/O ports on composite nodes,
+So that I can define the interface contract between a parent graph and its child layer.
 
 **Acceptance Criteria:**
 
-**Given** a rendered Mermaid diagram
-**When** the PM hovers over a node
-**Then** the node visually highlights (border glow or color shift)
+**Given** a composite node is selected in the diagram
+**When** the user opens the Port Editor (via context menu or panel action)
+**Then** a UI panel displays the current ports of the composite node's child LayerGraph
+**And** each port shows: name, direction (input/output), optional type, and position order
 
-**Given** a rendered Mermaid diagram
-**When** the PM clicks a node
-**Then** a context menu appears with actions relevant to that node
+**Given** the Port Editor is open
+**When** the user clicks "Add Port"
+**Then** a new port is added with default values (auto-generated name, direction "input")
+**And** the user can edit all port fields inline
 
-**Given** the PM clicks an edge
-**When** the edge is selected
-**Then** edge-specific actions are available (e.g. "Add condition", "Remove connection")
+**Given** a port exists in the editor
+**When** the user modifies its name, direction, or type
+**Then** the change is saved via `PATCH /api/workspaces/[id]/layers/[layerId]` (ports field)
+**And** the summary cache is invalidated
 
-**Technical Note:**
+**Given** a port exists in the editor
+**When** the user clicks "Remove" on a port
+**Then** the port is removed from the ports array
+**And** a confirmation is shown if edges reference this port
 
-- Mermaid renders to SVG — parse the SVG to attach click handlers to node/edge elements
-- Map SVG element IDs back to JsonGraph node/edge IDs
-- Consider using `mermaid.render()` + post-processing vs. a custom SVG renderer
+**Given** soft limits (max 10 ports per composite, AR-L9)
+**When** the user adds a port that exceeds the limit
+**Then** a warning is displayed but the operation is allowed
 
-### Story 7.2: Patch Animations
+**Given** the ports are updated
+**When** contract validation runs (async, debounced 2s)
+**Then** any port↔edge inconsistencies are surfaced as warning badges
 
-As a Product Manager,
-I want to see diagram changes animated smoothly when the AI modifies the flow,
-so that I can visually track what changed instead of comparing static snapshots.
+**Technical Notes:**
 
-**Acceptance Criteria:**
+- New: `src/components/studio/PortEditor.tsx`
+- Modify: `src/components/studio/DiagramContextMenu.tsx` (add "Edit Ports" action)
+- Uses `PATCH /api/workspaces/[id]/layers/[layerId]` from Story 9.1
+- Requirements: FR-L2, FR-L5 (manual part), AR-L2, AR-L9
 
-**Given** a JSON patch adds a new node
-**When** the diagram re-renders
-**Then** the new node fades in with a smooth animation (300ms)
+## Epic 10: AI-Aware Layers
 
-**Given** a JSON patch removes a node
-**When** the diagram re-renders
-**Then** the removed node fades out before disappearing (200ms)
+**Goal:** Enable the AI system (claudegraph) to understand and operate within the hierarchical layer context — building rich but bounded context, inferring port contracts, and validating consistency asynchronously.
 
-**Given** a JSON patch adds a new edge
-**When** the diagram re-renders
-**Then** the edge draws in progressively (line animation)
+### Story 10.1: AI Layer Context Builder
 
-**Given** a full diagram is generated for the first time
-**When** it renders
-**Then** nodes appear sequentially (top-to-bottom/left-to-right) with staggered timing
-
-### Story 7.3: Live Review Indicators
-
-As a Product Manager,
-I want to see colored badges on diagram nodes that indicate potential issues,
-so that I can instantly see where risks and edge cases exist without opening a review panel.
+As a user,
+I want the AI to understand my current position in the layer hierarchy when I chat,
+So that its responses respect parent contracts, sibling context, and child interfaces.
 
 **Acceptance Criteria:**
 
-**Given** a diagram has been generated or modified
-**When** the live review graph completes
-**Then** nodes with identified issues display a colored badge (green=ok, yellow=medium, red=high/critical)
+**Given** the user is editing a layer at depth N
+**When** the AI processes a chat message (via studio-session.graph)
+**Then** `buildLayerContext(layerGraphId)` is called and returns a `LayerContext` object containing:
 
-**Given** a node has a review badge
-**When** the PM hovers over the badge
-**Then** a tooltip shows a brief summary of the issue
+- `current`: full JsonGraph + ports + name + depth
+- `parent`: ports + sibling summaries (or null if root)
+- `ancestors`: AI-generated summaries for grandparent and beyond (max 2 levels, NFR-L2)
+- `children`: names + ports only (no internal graphs)
 
-**Given** a node has a review badge
-**When** the PM clicks the badge
-**Then** the full review detail appears (description, severity, suggestions)
+**Given** a LayerContext is built
+**When** the AI prompt is constructed in `refine-flow.ts`
+**Then** the layer context is injected following the prompt template pattern from the architecture document
+**And** the prompt includes contract constraints ("respect these inputs/outputs")
 
-**Technical Note:**
+**Given** a layer at depth > 2
+**When** `buildLayerContext` fetches ancestor summaries
+**Then** summaries are read from the `summary` field on LayerGraph (cached)
+**And** if no cached summary exists, it is generated via `summary-generator.ts` and cached
 
-- `live-review.graph`: `[extract-nodes] → [review (LLMNode)] → [map-annotations] → END`
-- Runs asynchronously after each diagram update (debounced 2s)
-- Annotations stored as `{ nodeId, severity, message }[]`
-- Rendered as SVG overlays on the diagram
+**Given** the summary generator runs
+**When** it generates a summary for a LayerGraph
+**Then** the summary is stored in the `summary` field of that LayerGraph
+**And** the summary is a concise text (1-3 sentences) describing the graph's purpose and key nodes
 
-### Story 7.4: Node Context Menu
+**Given** a LayerGraph's `graph` field is modified
+**When** the update is saved
+**Then** the `summary` field is set to null (cache invalidated — already in Story 9.1 PATCH)
 
-As a Product Manager,
-I want a contextual action menu when I click a diagram node,
-so that I can perform AI-powered actions on specific parts of my flow.
+**Given** the studio-session.graph state type
+**When** layer awareness is added
+**Then** `currentLayerId` and `layerStack` fields are included in the state
+**And** the interact API route passes these from the request body
 
-**Acceptance Criteria:**
+**Technical Notes:**
 
-**Given** a PM clicks a node in the diagram
-**When** the context menu appears
-**Then** it offers actions: "Expand into sub-flow", "Ask a question about this node", "Simplify", "View review details"
+- New: `src/lib/layer/context-builder.ts`, `src/lib/layer/summary-generator.ts`
+- Modify: `src/lib/ai/prompts/refine-flow.ts` (inject layer context)
+- Modify: `src/lib/graphs/studio-session.graph.ts` (layer-aware state)
+- Modify: `src/lib/graphs/studio-session.types.ts` (add currentLayerId, layerStack)
+- Modify: `src/app/api/studio/[workspaceId]/interact/route.ts` (pass layer fields)
+- Requirements: FR-L4, NFR-L2, AR-L5, AR-L12
 
-**Given** the PM selects "Expand into sub-flow"
-**When** the AI processes it
-**Then** the selected node is replaced by a detailed sub-flow with multiple steps
+### Story 10.2: AI Port Inference
 
-**Given** the PM selects "Ask a question about this node"
-**When** the chat opens
-**Then** the conversation is pre-filled with context about the selected node
-
-**Given** the PM selects "Simplify"
-**When** the AI processes it
-**Then** the node and its immediate connections are simplified (merged or reduced)
-
----
-
-## Epic 8: Canvas Spatial (V2)
-
-**Goal:** Evolve the split-view studio into a free-form spatial canvas where all artifacts (diagrams, conversations, reviews, specs, stories) are positioned and visually connected.
-
-**Sprint:** Sprint 5+
-
-**Dependencies:** Epic 6 (studio), Epic 7 (interactive diagram)
-
-### Story 8.1: Canvas Data Model
-
-As a Developer,
-I want a data model for positioned, connected artifacts on a spatial canvas,
-so that the studio can render all workspace artifacts in a free-form layout.
+As a user,
+I want the AI to automatically suggest port contracts when I create a composite node,
+So that I don't have to manually define every port from scratch.
 
 **Acceptance Criteria:**
 
-**Given** the canvas data model is implemented
-**When** an artifact is created
-**Then** it has position metadata (`{ x, y, width, height }`) and a type (diagram, conversation, review, spec, story, note)
+**Given** a node in the parent graph is being decomposed into a composite node
+**When** the AI analyzes the parent graph context
+**Then** it examines all edges connected to that node (incoming = input ports, outgoing = output ports)
+**And** generates a suggested port list with inferred names, directions, and optional types
 
-**Given** two artifacts exist on the canvas
-**When** a connection is created between them
-**Then** the connection is persisted with source/target IDs and optional label
+**Given** the AI has generated port suggestions
+**When** the suggestions are presented to the user
+**Then** they are shown as a preview (non-destructive) that the user can accept, modify, or reject
+**And** the Port Editor (Story 9.5) is pre-populated with the suggestions if accepted
 
-**Given** the V1 split-view layout
-**When** migrating to canvas
-**Then** existing artifacts are positioned automatically (conversation left, diagram right)
+**Given** the user accepts AI-inferred ports
+**When** the ports are saved
+**Then** they are stored on the child LayerGraph via `PATCH /api/workspaces/[id]/layers/[layerId]`
 
-### Story 8.2: Canvas Renderer
+**Given** the AI generates ports
+**When** the total would exceed the soft limit (10 ports)
+**Then** a warning is shown and the AI is prompted to consolidate ports
 
-As a Product Manager,
-I want a free-form canvas where I can pan, zoom, and arrange my design artifacts spatially,
-so that I can organize my product design thinking in a way that makes sense to me.
+**Technical Notes:**
 
-**Acceptance Criteria:**
+- Logic integrated into `context-builder.ts` or a new helper in `src/lib/layer/`
+- Port inference runs when creating a child layer from a composite node
+- Reuses `POST /api/workspaces/[id]/layers/[layerId]/child` from Story 9.1
+- Requirements: FR-L5 (AI inference part), AR-L2, AR-L9
 
-**Given** a workspace with multiple artifacts
-**When** the PM opens the canvas view
-**Then** all artifacts are rendered at their stored positions on an infinite canvas
+### Story 10.3: Async Contract Validation
 
-**Given** the canvas is active
-**When** the PM drags an artifact
-**Then** it moves smoothly and its position is persisted
-
-**Given** the canvas is active
-**When** the PM scrolls or pinches
-**Then** the canvas pans and zooms smoothly
-
-### Story 8.3: Multi-Artifact Canvas
-
-As a Product Manager,
-I want to see my diagrams, specs, reviews, and conversations as interconnected cards on the canvas,
-so that I can visualize the relationships between all my product design artifacts.
+As a user,
+I want the system to automatically check port↔edge consistency after modifications,
+So that I'm warned about contract violations without being blocked in my creative flow.
 
 **Acceptance Criteria:**
 
-**Given** specs have been generated from a diagram
-**When** they appear on the canvas
-**Then** story cards are visually connected to the diagram nodes they trace back to
+**Given** the user modifies ports on a composite node or edges connected to a composite node
+**When** the modification is saved
+**Then** contract validation is triggered asynchronously after a 2-second debounce
 
-**Given** a review annotation exists on a node
-**When** the canvas renders
-**Then** the review card is positioned near the relevant diagram node with a visual connection
+**Given** contract validation runs
+**When** `contract-validator.ts` checks the current layer
+**Then** it verifies:
 
-**Given** multiple artifacts are connected
-**When** the PM views the canvas
-**Then** connection lines are drawn between related artifacts with optional labels
+- Every input port has at least one incoming edge in the parent graph
+- Every output port has at least one outgoing edge in the parent graph
+- No edges reference non-existent ports
+- Port types match edge semantics (if types are defined)
 
----
+**Given** validation finds inconsistencies
+**When** the results are returned
+**Then** `ValidationWarning[]` objects are created with `{ nodeId, severity, message }`
+**And** these are displayed as warning badges via the existing badge-renderer pattern
+**And** warnings are non-blocking — the user can continue working
 
-## Sprint Plan Summary
+**Given** the AI generates or modifies a graph
+**When** the AI response is applied
+**Then** contract validation runs immediately (no debounce) to catch AI-generated violations
 
-| Sprint    | Duration  | Stories                                           | Key Deliverable                                                    |
-| --------- | --------- | ------------------------------------------------- | ------------------------------------------------------------------ |
-| Sprint 0  | 1.5 weeks | 0.1, 0.2, 0.3, 0.4, 1.2, 1.1 + json2mermaid spike | Foundations + Dev env + Workspace + json2mermaid module            |
-| Sprint 1  | 2 weeks   | 2.0, 2.1, 2.2, 3.1                                | AI client + Diagram editor + AI generation + AI review             |
-| Sprint 2  | 2 weeks   | 4.1, 4.2, 5.1                                     | Spec generation + export + multi-persona chat                      |
-| Sprint 3  | 3 weeks   | 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7                 | Product Design Studio (conversational + multi-persona + sessions)  |
-| Sprint 4  | 2 weeks   | 7.1, 7.2, 7.3, 7.4                                | Interactive diagram (SVG, animations, review badges, context menu) |
-| Sprint 5+ | 3 weeks   | 8.1, 8.2, 8.3                                     | Canvas spatial layout (free-form, multi-artifact)                  |
+**Given** all ports and edges are consistent
+**When** validation completes
+**Then** any existing warning badges are cleared
 
-**Total V1 duration: 5.5 weeks (completed)**
-**Total V2 duration: ~8 additional weeks**
+**Technical Notes:**
 
-### Sprint 0 Execution Order
+- New: `src/lib/layer/contract-validator.ts`
+- Reuses badge-renderer pattern from Story 7.3 (live review indicators)
+- Debounce logic in StudioLayout (2s, similar to existing live-review)
+- Requirements: FR-L7, AR-L8
 
-| Order | Story                        | Est. Duration | Parallel?         |
-| ----- | ---------------------------- | ------------- | ----------------- |
-| 1     | 1.2 — Docker Compose dev env | 1 day         | ← start here      |
-| 2     | 0.1 — Project Bootstrap      | 1-2 days      | parallel with 1.2 |
-| 3     | 0.2 — Auth Foundation        | 2 days        | after 0.1         |
-| 4     | 0.3 — App Shell & UI         | 1-2 days      | parallel with 0.2 |
-| 5     | 0.4 — Testing Infrastructure | 1 day         | parallel with 0.3 |
-| 6     | 1.1 — Workspace CRUD         | 2-3 days      | after 0.2 + 0.3   |
-| 7     | json2mermaid spike           | 3 days        | parallel with 1.1 |
+## Epic 11: AI Structural Refactoring
 
-### Sprint 1 Execution Order
+**Goal:** Enable the AI to analyze a flat graph and propose hierarchical decomposition, with an interactive negotiation loop and atomic application backed by checkpoint-based rollback.
 
-| Order | Story                      | Est. Duration | Parallel?                |
-| ----- | -------------------------- | ------------- | ------------------------ |
-| 1     | 2.0 — AI Client Foundation | 2 days        | ← start here             |
-| 2     | 2.1 — Mermaid Editor       | 3-4 days      | parallel with 2.0        |
-| 3     | 2.2 — AI Flow Generation   | 4-5 days      | after 2.0 + json2mermaid |
-| 4     | 3.1 — Multi-Profile Review | 3-4 days      | after 2.0 + 2.1          |
+### Story 11.1: Restructure Proposal and Negotiation
 
-### Sprint 3 Execution Order
+As a user,
+I want to ask the AI to analyze my flat graph and propose a layer decomposition,
+So that I can restructure a complex graph into organized hierarchical layers through an interactive negotiation.
 
-| Order | Story                               | Est. Duration | Parallel?         |
-| ----- | ----------------------------------- | ------------- | ----------------- |
-| 1     | 6.1 — Studio Layout & Onboarding UX | 3 days        | ← start here      |
-| 2     | 6.2 — Studio Session Graph          | 4-5 days      | after 6.1         |
-| 3     | 6.6 — SSE/Streaming                 | 2-3 days      | parallel with 6.2 |
-| 4     | 6.3 — Conversational Onboarding     | 3 days        | after 6.2         |
-| 5     | 6.4 — Multi-Persona AI Team (BMAD)  | 3-4 days      | after 6.2         |
-| 6     | 6.5 — Iterative Refinement          | 3 days        | after 6.3 + 6.4   |
-| 7     | 6.7 — BMAD Session Isolation        | 2-3 days      | parallel with 6.5 |
+**Acceptance Criteria:**
 
-### Sprint 4 Execution Order
+**Given** the user has a flat graph (or existing hierarchy) they want to restructure
+**When** they request restructuring via chat (e.g., "refacto pour délimiter les scopes avec différents Layers")
+**Then** the `restructure-layers.graph` claudegraph is invoked with the current graph
 
-| Order | Story                         | Est. Duration | Parallel?         |
-| ----- | ----------------------------- | ------------- | ----------------- |
-| 1     | 7.1 — Interactive SVG Diagram | 4 days        | ← start here      |
-| 2     | 7.2 — Patch Animations        | 3 days        | after 7.1         |
-| 3     | 7.3 — Live Review Indicators  | 3 days        | parallel with 7.2 |
-| 4     | 7.4 — Node Context Menu       | 2-3 days      | after 7.1         |
+**Given** the restructure graph starts
+**When** the analyze step runs
+**Then** it examines the graph structure and identifies candidate clusters of related nodes
+**And** reports the analysis to the user via SSE
 
-## Dependency Graph
+**Given** analysis is complete
+**When** the propose step runs
+**Then** it generates a `proposedClusters: Cluster[]` with:
 
-### V1 (Epics 0–5)
+- Cluster name (suggested composite node name)
+- Nodes included in each cluster
+- Suggested ports for each cluster (inferred from cross-cluster edges)
+- Mode used: bottom-up, top-down, or hybrid
 
-```
-0.1 (Bootstrap) ──→ 0.2 (Auth) ──→ 1.1 (Workspace)
-       │                                   │
-       ├──→ 0.3 (App Shell) ───────────────┤
-       │                                   │
-       ├──→ 0.4 (Testing) ─ ─ ─(parallel)  │
-       │                                   ↓
-1.2 (Docker) ───────────────→ ALL STORIES  2.1 (Mermaid Editor)
-                                           │
-json2mermaid spike ──→ 2.2 (AI Gen) ──────┤
-                           │               │
-2.0 (AI Client) ──────────┤               │
-                           ↓               ↓
-                      3.1 (AI Review) ──→ 4.1 (Spec Gen) ──→ 4.2 (Export)
-                           │
-                           └──→ 5.1 (Chat Multi-Persona)
-```
+**Given** clusters are proposed
+**When** the InteractionNode presents them to the user
+**Then** the user can:
 
-### V2 (Epics 6–8)
+- Accept the proposal as-is
+- Adjust clusters (move nodes between clusters, rename, split, merge)
+- Reject and ask AI to re-propose with different constraints
+- Choose `from_scratch: true` to rethink from zero
 
-```
-ALL V1 STORIES ──→ 6.1 (Studio Layout)
-                       │
-                       ├──→ 6.2 (Session Graph) ──→ 6.3 (Onboarding)
-                       │        │                       │
-                       │        ├──→ 6.4 (BMAD Team) ──┤
-                       │        │                       ↓
-                       │        └──→ 6.6 (SSE)     6.5 (Refinement)
-                       │                               │
-                       │                          6.7 (Session Isolation)
-                       │
-                       └──→ 7.1 (Interactive SVG) ──→ 7.2 (Animations)
-                                    │                      │
-                                    ├──→ 7.4 (Context Menu)│
-                                    │                      ↓
-                                    └──→ 7.3 (Live Review Indicators)
-                                                           │
-                                                           ↓
-                                    8.1 (Canvas Data Model) ──→ 8.2 (Canvas Renderer)
-                                                                      │
-                                                                      ↓
-                                                               8.3 (Multi-Artifact)
-```
+**Given** the user adjusts clusters
+**When** the adjustments are submitted
+**Then** the proposal is updated and re-presented for confirmation
+**And** this loop continues until the user validates
 
-## Risk Register
+**Given** the user requests restructuring with a specific mode
+**When** the mode is `bottom-up`
+**Then** the AI groups leaf nodes into clusters first, then builds parent layers
+**When** the mode is `top-down`
+**Then** the AI identifies major domains first, then assigns nodes to each
+**When** the mode is `hybrid`
+**Then** the AI uses a mix based on graph structure
 
-| Risk                                                         | Mitigation                                                                                 | Owner     |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | --------- |
-| LLM generates invalid Mermaid                                | json2mermaid module (JSON intermediate)                                                    | Architect |
-| AI review not contextual enough                              | Iterative prompt engineering + diagram AST as context                                      | Dev       |
-| Spec traceability breaks                                     | Structured output with diagram node references                                             | Dev       |
-| Scope creep on chat personas                                 | Limit to 4 personas MVP, reuse US-3.1 infra                                                | PM        |
-| Auth adds complexity to Sprint 0                             | Use NextAuth with simple email/password, no OAuth MVP                                      | Dev       |
-| Sprint 0 overloaded with foundations                         | Parallelize 1.2/0.1 and 0.3/0.4, strict timebox                                            | SM        |
-| AI costs unpredictable                                       | Rate limiting + token tracking from day 1 (Story 2.0)                                      | Architect |
-| Claude CLI `/bmad-party-mode` not working in spawned process | Spike test early; fallback to prompt-injected personas if needed                           | Dev       |
-| InteractionNode API not matching expectations                | Explore claudegraph InteractionNode API early in Story 6.2; adapt graph pattern if needed  | Architect |
-| SSE connection reliability across firewalls/proxies          | Implement auto-reconnect with last-event-ID; consider WebSocket fallback                   | Dev       |
-| BMAD session filesystem grows unbounded                      | Implement TTL + cleanup job; future S3 offload for inactive sessions                       | Architect |
-| Mermaid SVG click targets unreliable                         | Post-process SVG to ensure consistent element IDs; maintain JsonGraph↔SVG ID mapping       | Dev       |
-| Patch animations cause jank on large diagrams                | Debounce rapid patches; limit animation to visible viewport; use CSS transitions over JS   | Dev       |
-| Multi-persona responses slow (3x LLM calls)                  | BMAD party mode handles selection internally; single CLI call returns multi-persona output | Architect |
+**Given** the restructure endpoint
+**When** `POST /api/ai/restructure` is called
+**Then** it streams progress via SSE (analyzing → proposing → negotiating → applying → done)
+
+**Technical Notes:**
+
+- New: `src/lib/graphs/restructure-layers.graph.ts`
+- New: `src/app/api/ai/restructure/route.ts`
+- State type: `RestructureState` (from architecture document)
+- InteractionNode for negotiation loop
+- Requirements: FR-L6, NFR-L5, AR-L6
+
+### Story 11.2: Atomic Apply with Checkpoint Restore
+
+As a user,
+I want the validated restructure proposal to be applied atomically with a pre-restructure checkpoint,
+So that I can safely roll back if the result doesn't match my expectations.
+
+**Acceptance Criteria:**
+
+**Given** the user has validated a restructure proposal
+**When** the apply step begins
+**Then** a checkpoint tagged `"pre-restructure"` is automatically created via the existing checkpoint system (D7)
+**And** the checkpoint captures the entire current state (all LayerGraphs for the workspace)
+
+**Given** a checkpoint is created
+**When** the atomic apply runs
+**Then** for each cluster in the validated proposal:
+
+1. A new child LayerGraph is created with the clustered nodes as its graph
+2. The clustered nodes are replaced by a single composite node in the parent graph
+3. Ports are set on the child LayerGraph based on cross-cluster edges
+4. Cross-cluster edges are rewired to the composite node
+   **And** all operations succeed or all are rolled back (transactional)
+
+**Given** the restructure is applied
+**When** the user views the result
+**Then** the parent graph shows composite nodes where clusters were
+**And** double-clicking a composite navigates to the child layer (using Story 9.3 navigation)
+**And** port contracts are consistent (validated by Story 10.3)
+
+**Given** the user is unhappy with the result
+**When** they access the checkpoint timeline (existing `CheckpointTimeline.tsx`)
+**Then** the `"pre-restructure"` checkpoint is visible
+**And** restoring it reverts all LayerGraphs to their pre-restructure state
+
+**Given** the restructure involves multiple layers
+**When** the apply step processes the proposal
+**Then** all layers are updated in a single database transaction
+**And** if any step fails, the entire restructure is rolled back
+
+**Given** the restructure completes successfully
+**When** the status reaches 'done'
+**Then** contract validation (Story 10.3) runs on all affected layers
+**And** the UI updates to reflect the new hierarchical structure
+
+**Technical Notes:**
+
+- Extends `restructure-layers.graph.ts` from Story 11.1
+- Reuses existing checkpoint system (`CheckpointTimeline.tsx`, checkpoint API)
+- Prisma `$transaction` for atomicity
+- Requirements: FR-L8, NFR-L5, AR-L7
