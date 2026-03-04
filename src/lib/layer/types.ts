@@ -36,3 +36,6 @@ export const SOFT_LIMITS = {
   nodes: 50,
   composites: 15,
 } as const;
+
+// Re-export for convenience — defined in contract-validator.ts
+export type { ValidationWarning } from './contract-validator';

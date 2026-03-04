@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { MermaidPreview } from '@/components/diagram/MermaidPreview';
@@ -12,6 +12,7 @@ import { NodeChatModal } from '@/components/diagram/NodeChatModal';
 import type { PatchAnimationEvent } from '@/lib/graphs/studio-session.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
+import type { ValidationWarning } from '@/lib/layer/contract-validator';
 
 type ContextMenuState =
   | { type: 'node'; nodeId: string; position: ClickPosition }
@@ -31,6 +32,8 @@ export type DiagramPreviewPanelProps = {
   graph?: JsonGraph;
   /** Review annotations from the live-review graph — rendered as SVG badge overlays. */
   annotations?: Annotation[];
+  /** Story 10.3 — Contract validation warnings rendered as SVG badge overlays. */
+  validationWarnings?: ValidationWarning[];
   /** Whether a live review is currently in progress. */
   isReviewRunning?: boolean;
   /** Called when the user selects an action from the context menu. */
@@ -53,6 +56,7 @@ export function DiagramPreviewPanel({
   patchAnimation,
   graph,
   annotations,
+  validationWarnings,
   isReviewRunning = false,
   onDiagramAction,
   onGraphUpdate,
@@ -61,6 +65,19 @@ export function DiagramPreviewPanel({
   onNavigateToLayer,
   currentLayerGraphId,
 }: DiagramPreviewPanelProps) {
+  // Story 10.3: merge contract validation warnings into annotations for badge rendering
+  // Map ValidationWarning severity to Annotation severity
+  const mergedAnnotations = useMemo<Annotation[]>(
+    () => [
+      ...(annotations ?? []),
+      ...(validationWarnings ?? []).map((w) => ({
+        nodeId: w.nodeId,
+        severity: (w.severity === 'error' ? 'critical' : 'medium') as Annotation['severity'],
+        message: w.message,
+      })),
+    ],
+    [annotations, validationWarnings]
+  );
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
@@ -134,7 +151,7 @@ export function DiagramPreviewPanel({
       }
 
       if (action.type === 'view-review') {
-        const annotation = annotations?.find((a) => a.nodeId === action.nodeId) ?? null;
+        const annotation = mergedAnnotations.find((a) => a.nodeId === action.nodeId) ?? null;
         if (annotation) {
           setSelectedAnnotation(annotation);
         } else {
@@ -193,7 +210,7 @@ export function DiagramPreviewPanel({
       onGraphUpdate,
       onSummaryMessage,
       graph,
-      annotations,
+      mergedAnnotations,
       workspaceId,
       navigateToLayer,
     ]
@@ -269,7 +286,7 @@ export function DiagramPreviewPanel({
           <MermaidPreview
             content={diagramContent!}
             graph={graph}
-            annotations={annotations}
+            annotations={mergedAnnotations}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             onBadgeClick={handleBadgeClick}

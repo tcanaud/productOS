@@ -33,6 +33,9 @@ import { useCheckpointTree } from '@/hooks/useCheckpointTree';
 import type { StudioSessionState } from '@/lib/graphs/studio-session.types';
 import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
 import type { InferredPort, PortInferenceResult } from '@/lib/layer/port-inference';
+import { validateContracts } from '@/lib/layer/contract-validator';
+import type { ValidationWarning } from '@/lib/layer/contract-validator';
+import type { LayerGraphRecord } from '@/lib/layer/types';
 
 export type PersonaBubble = {
   personaId: string;
@@ -119,6 +122,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     layerId: string;
     result: PortInferenceResult;
   } | null>(null);
+
+  // Story 10.3 — Contract validation warnings + debounce ref
+  const [validationWarnings, setValidationWarnings] = useState<ValidationWarning[]>([]);
+  const contractDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -306,6 +313,35 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       // No-op: the studio diagram was already in diagramContent before layer navigation
     }
   }, [layerStack, popLayer, router, searchParams, workspaceId]);
+
+  // Story 10.3 — Run contract validation against the current layer (if any)
+  const runContractValidation = useCallback(
+    async (layerId: string, parentGraph: JsonGraph) => {
+      try {
+        const res = await fetch(`/api/workspaces/${workspaceId}/layers/${layerId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { layer: LayerGraphRecord };
+        const layer = data.layer;
+        if (!layer) return;
+        const warnings = validateContracts(layer, parentGraph);
+        setValidationWarnings(warnings);
+      } catch {
+        // Best-effort
+      }
+    },
+    [workspaceId]
+  );
+
+  // Story 10.3 — Debounced contract validation (2s) — triggered after port/edge saves
+  const scheduleContractValidation = useCallback(
+    (layerId: string, parentGraph: JsonGraph) => {
+      if (contractDebounceRef.current) clearTimeout(contractDebounceRef.current);
+      contractDebounceRef.current = setTimeout(() => {
+        void runContractValidation(layerId, parentGraph);
+      }, 2000);
+    },
+    [runContractValidation]
+  );
 
   // Prune review items whose nodeId no longer exists in the current graph
   const pruneStaleReviewItems = useCallback(
@@ -579,6 +615,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   );
 
   // Story 7.4: handle graph update from AI node actions (expand / simplify)
+  // Story 10.3: run contract validation immediately (no debounce) for AI-generated changes
   const handleGraphUpdate = useCallback(
     (updatedGraph: JsonGraph) => {
       currentGraphRef.current = updatedGraph;
@@ -589,8 +626,14 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       } catch {
         // If conversion fails, keep the existing diagram content unchanged
       }
+      // Immediate contract validation for AI-generated changes
+      const currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      if (currentLayerId) {
+        void runContractValidation(currentLayerId, updatedGraph);
+      }
     },
-    [pruneStaleReviewItems]
+    [pruneStaleReviewItems, layerStack, runContractValidation]
   );
 
   // Helper to get current messages for persistence (uses a ref to avoid stale closures)
@@ -1097,6 +1140,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
               patchAnimation={patchAnimation}
               graph={currentGraphRef.current ?? undefined}
               annotations={annotations}
+              validationWarnings={validationWarnings}
               isReviewRunning={isReviewRunning}
               onDiagramAction={handleDiagramAction}
               onGraphUpdate={handleGraphUpdate}
@@ -1129,6 +1173,11 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           workspaceId={workspaceId}
           graph={currentGraphRef.current ?? undefined}
           onClose={() => {
+            // Story 10.3: schedule contract validation after port editor closes (ports may have changed)
+            const parentGraph = currentGraphRef.current;
+            if (parentGraph) {
+              scheduleContractValidation(portEditorLayerId, parentGraph);
+            }
             setPortEditorLayerId(null);
             setPortEditorInitialPorts(undefined);
           }}
