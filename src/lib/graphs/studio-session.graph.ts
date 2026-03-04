@@ -26,6 +26,8 @@ import { buildRefinePrompt } from '@/lib/ai/prompts/refine-flow';
 import { selectPersonas } from '@/lib/personas/registry';
 import { parsePartyModeResponseFull } from '@/lib/personas/parser';
 import { applyPatch } from './patch-applier';
+import { buildLayerContext } from '@/lib/layer/context-builder';
+import type { LayerContext } from '@/lib/layer/context-builder';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -355,7 +357,9 @@ Available node shapes — use diverse shapes to make the diagram visually inform
 Avoid using only "rect" — pick the shape that best represents each node's role.`;
 }
 
-function buildRefineDiagramPrompt(state: StudioSessionState): string {
+function buildRefineDiagramPrompt(
+  state: StudioSessionState & { _layerContext?: LayerContext | null }
+): string {
   const messages = state.messages;
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const currentGraph = state.currentDiagram;
@@ -366,7 +370,9 @@ function buildRefineDiagramPrompt(state: StudioSessionState): string {
 
   // Use last 6 messages as conversation history for context
   const history = messages.slice(-6);
-  const { system, user } = buildRefinePrompt(currentGraph, lastUserMessage, history);
+  // Story 10.1: pass layer context when editing a child layer
+  const layerContext = state._layerContext ?? undefined;
+  const { system, user } = buildRefinePrompt(currentGraph, lastUserMessage, history, layerContext);
 
   // LLMNode takes a single prompt string; combine system + user sections
   return `${system}\n\n---\n\n${user}`;
@@ -815,13 +821,38 @@ export function createStudioSessionGraph() {
     })
   );
 
+  // ── Node 11b: build-refine-context (Story 10.1) ─────────────────────────
+  // Fetches the LayerContext for the current layer (if any) and stores it in
+  // _layerContext so the refine LLMNode can pass it to buildRefinePrompt.
+  graph.addNode(
+    new FnNode({
+      id: 'build-refine-context',
+      fn: async (ctx) => {
+        const state = ctx.state as StudioSessionState;
+        if (!state.currentLayerId) {
+          return { kind: 'continue' as const, statePatch: { _layerContext: null } };
+        }
+        try {
+          const layerCtx = await buildLayerContext(state.workspaceId, state.currentLayerId);
+          return { kind: 'continue' as const, statePatch: { _layerContext: layerCtx } };
+        } catch (err) {
+          console.warn('[build-refine-context] Failed to build layer context:', err);
+          return { kind: 'continue' as const, statePatch: { _layerContext: null } };
+        }
+      },
+    })
+  );
+
   // ── Node 12: refine (LLMNode) ────────────────────────────────────────────
   graph.addNode(
     new LLMNode({
       id: 'refine',
       provider: 'claude',
       schema: DiagramPatchSchema,
-      prompt: (ctx) => buildRefineDiagramPrompt(ctx.state as StudioSessionState),
+      prompt: (ctx) =>
+        buildRefineDiagramPrompt(
+          ctx.state as StudioSessionState & { _layerContext?: LayerContext | null }
+        ),
       maxRepairs: 2,
       timeoutMs: 120_000,
     })
@@ -947,13 +978,16 @@ export function createStudioSessionGraph() {
     .priority(3)
     .done();
 
-  // route-diagram → refine (when intent is refine)
+  // route-diagram → build-refine-context (when intent is refine) → refine
   graph
     .from('route-diagram')
-    .to('refine')
+    .to('build-refine-context')
     .when((ctx) => (ctx.state as StudioSessionState).intent === 'refine')
     .priority(2)
     .done();
+
+  // build-refine-context → refine
+  graph.from('build-refine-context').to('refine').done();
 
   // route-diagram → persist (when intent is confirm)
   graph

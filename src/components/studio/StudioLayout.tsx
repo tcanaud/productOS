@@ -579,6 +579,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       body.activeBranchName = cpTree.activeBranch;
       body.turnNumber = cpTree.turnNumber;
       body.messageHistory = messagesRef.current;
+      // Story 10.1: layer-awareness
+      body.currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      body.layerStack = layerStack;
 
       try {
         const res = await fetch(`/api/studio/${workspaceId}/interact`, {
@@ -680,6 +684,10 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
       body.activeBranchName = cpTree.activeBranch;
       body.turnNumber = cpTree.turnNumber;
       body.messageHistory = messagesRef.current;
+      // Story 10.1: layer-awareness — send current layer context to the server
+      body.currentLayerId =
+        layerStack.length > 1 ? layerStack[layerStack.length - 1].graphId : null;
+      body.layerStack = layerStack;
 
       const res = await fetch(`/api/studio/${workspaceId}/interact`, {
         method: 'POST',
