@@ -36,8 +36,33 @@ import type { LayerContext } from '@/lib/layer/context-builder';
 /** Classify user intent from raw message text. */
 export function classifyIntent(
   message: string
-): 'describe' | 'refine' | 'confirm' | 'discuss' | 'other' {
+): 'describe' | 'refine' | 'confirm' | 'discuss' | 'restructure' | 'other' {
   const lower = message.toLowerCase().trim();
+
+  // Story 11.1 — Detect restructure / layer decomposition requests
+  const restructureKeywords = [
+    'refacto',
+    'restructure',
+    'reorganize',
+    'reorganise',
+    'layer decomposition',
+    'decompose',
+    'délimiter',
+    'hierarchical',
+    'hierarchie',
+    'hiérarchie',
+    'layer organization',
+    'layer structure',
+    'scope',
+    'scopes',
+    'cluster',
+    'group nodes',
+    'regrouper',
+    'composite nodes',
+  ];
+  if (restructureKeywords.some((kw) => lower.includes(kw))) {
+    return 'restructure';
+  }
 
   if (
     lower === 'yes' ||

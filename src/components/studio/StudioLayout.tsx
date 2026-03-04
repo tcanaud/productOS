@@ -20,6 +20,7 @@ import type {
   DiagramFullPayload,
   DiagramUpdatePayload,
   InteractionPayload,
+  RestructureProgressPayload,
 } from '@/lib/sse/sse.types';
 import { json2mermaid } from '@/lib/json2mermaid';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
@@ -491,6 +492,27 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         setIsLoading(false);
         checkpointRef.current = null;
         setSessionId(null);
+      } else if (event.type === 'restructure-progress') {
+        // Story 11.1: display restructure progress as a chat message
+        const payload = event.data as RestructureProgressPayload;
+        const stepEmoji: Record<string, string> = {
+          analyzing: '🔍',
+          proposing: '💡',
+          negotiating: '🤝',
+          applying: '⚙️',
+          done: '✅',
+        };
+        const emoji = stepEmoji[payload.step] ?? '📊';
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: event.id,
+            role: 'assistant' as const,
+            content: `${emoji} **Restructure** — ${payload.message}`,
+            timestamp: new Date(event.timestamp),
+          },
+        ]);
+        setIsLoading(false);
       }
     }
   }, [events, pruneStaleReviewItems]);

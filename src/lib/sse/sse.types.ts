@@ -4,6 +4,7 @@
  */
 import type { DiagramPatch } from '@/lib/graphs/studio-session.types';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
+import type { Cluster } from '@/lib/graphs/restructure-layers.types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event type union
@@ -16,7 +17,8 @@ export type SSEEventType =
   | 'diagram-update'
   | 'diagram-full'
   | 'review-annotation'
-  | 'session-end';
+  | 'session-end'
+  | 'restructure-progress';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Payload interfaces
@@ -65,6 +67,21 @@ export interface SessionEndPayload {
   summary: string;
 }
 
+// Story 11.1 — Restructure progress event
+export type RestructureStep = 'analyzing' | 'proposing' | 'negotiating' | 'applying' | 'done';
+
+export interface RestructureProgressPayload {
+  step: RestructureStep;
+  /** Human-readable status message. */
+  message: string;
+  /** Current proposed clusters (present during negotiating/done steps). */
+  clusters?: Cluster[];
+  /** Analysis notes from LLM (present during proposing/negotiating steps). */
+  analysisNotes?: string;
+  /** Negotiation round number. */
+  negotiationRound?: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SSEEventMap: maps event type → payload
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,6 +94,7 @@ export interface SSEEventMap {
   'diagram-full': DiagramFullPayload;
   'review-annotation': ReviewAnnotationPayload;
   'session-end': SessionEndPayload;
+  'restructure-progress': RestructureProgressPayload;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
