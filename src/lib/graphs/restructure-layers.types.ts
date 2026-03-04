@@ -30,6 +30,8 @@ export interface Cluster {
 
 export interface RestructureState {
   workspaceId: string;
+  /** Studio ID — used by the apply node to create a pre-restructure checkpoint. */
+  studioId?: string;
   /** The flat (or existing hierarchical) graph to restructure. */
   graph: JsonGraph;
   /** Decomposition strategy: bottom-up, top-down, or hybrid. */
@@ -52,6 +54,10 @@ export interface RestructureState {
   updatedGraph?: JsonGraph;
   /** Error message if something went wrong. */
   error?: string;
+  /** ID of the pre-restructure checkpoint created before apply. */
+  checkpointId?: string;
+  /** IDs of newly created child LayerGraphs after atomic apply. */
+  appliedLayerIds?: string[];
   // Internal analysis fields (set by `analyze` FnNode)
   _nodeList?: { id: string; label: string; degree: number }[];
   _edgeList?: { from: string; to: string; label?: string }[];

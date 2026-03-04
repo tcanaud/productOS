@@ -55,6 +55,8 @@ const GraphEdgeSchema = z.object({
 
 const RequestSchema = z.object({
   workspaceId: z.string().min(1, 'workspaceId is required'),
+  /** Optional studio ID — used to create a pre-restructure checkpoint (Story 11.2). */
+  studioId: z.string().optional(),
   graph: z.object({
     diagramType: z.string(),
     nodes: z.array(GraphNodeSchema),
@@ -122,9 +124,14 @@ function emitSSEForOutcome(sessionId: string | undefined, outcome: RunOutcome): 
   if (outcome.status === 'ended') {
     const state = outcome.state as RestructureState;
     if (state.error) return;
-    emitProgress(sessionId, 'done', 'Restructuring applied successfully', {
-      clusters: state.finalClusters ?? [],
-    });
+    const appliedCount = state.appliedLayerIds?.length ?? 0;
+    const checkpointNote = state.checkpointId ? ' (checkpoint saved)' : '';
+    emitProgress(
+      sessionId,
+      'done',
+      `Restructuring applied — ${appliedCount} layer(s) created${checkpointNote}`,
+      { clusters: state.finalClusters ?? [] }
+    );
   }
 }
 
@@ -146,6 +153,7 @@ async function handler(req: NextRequest, _userId: string): Promise<NextResponse>
 
   const {
     workspaceId,
+    studioId,
     graph,
     mode = 'hybrid',
     sessionId,
@@ -179,6 +187,7 @@ async function handler(req: NextRequest, _userId: string): Promise<NextResponse>
 
       const initialState: RestructureState = {
         workspaceId,
+        ...(studioId ? { studioId } : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         graph: graph as any,
         mode: mode as RestructureMode,
@@ -202,6 +211,8 @@ async function handler(req: NextRequest, _userId: string): Promise<NextResponse>
         type: 'done',
         clusters: finalState.finalClusters ?? finalState.proposedClusters ?? [],
         ...(finalState.updatedGraph ? { updatedGraph: finalState.updatedGraph } : {}),
+        ...(finalState.checkpointId ? { checkpointId: finalState.checkpointId } : {}),
+        ...(finalState.appliedLayerIds ? { appliedLayerIds: finalState.appliedLayerIds } : {}),
       });
     }
 

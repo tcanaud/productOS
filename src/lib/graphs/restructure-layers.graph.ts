@@ -1,5 +1,5 @@
 /**
- * restructure-layers.graph.ts — Story 11.1
+ * restructure-layers.graph.ts — Story 11.1 / 11.2
  *
  * Claudegraph that analyzes a flat graph and proposes a hierarchical layer
  * decomposition via an interactive negotiation with the user.
@@ -10,11 +10,20 @@
  *       → [present (AskHumanNode)]  — pauses, routes via onAnswer:
  *           • accept  → [apply (FnNode)] → END
  *           • adjust  → [propose] (loop)
+ *
+ * Story 11.2: apply node now persists changes atomically to the database,
+ * creates a pre-restructure checkpoint, and validates port contracts.
  */
 import { Graph, FnNode, LLMNode, AskHumanNode, GraphRunner } from 'claudegraph';
 import { z } from 'zod';
-import type { RestructureState, Cluster } from './restructure-layers.types';
+import type { RestructureState, Cluster, SuggestedPort } from './restructure-layers.types';
 import type { JsonGraph, GraphNode, GraphEdge } from '@/lib/json2mermaid/types';
+import { prisma } from '@/lib/prisma';
+import type { Prisma } from '@/generated/prisma/client';
+import { checkpointPersistence } from '@/lib/studio/checkpoint-persistence';
+import { snapshotLayers } from '@/lib/layer/layer-snapshot';
+import { validateContracts } from '@/lib/layer/contract-validator';
+import type { LayerPort } from '@/lib/layer/types';
 
 // ── Zod schema for LLM output ─────────────────────────────────────────────────
 
@@ -384,11 +393,11 @@ export function createRestructureLayersGraph() {
     })
   );
 
-  // ── Node: apply (FnNode) ───────────────────────────────────────────────────
+  // ── Node: apply (FnNode) — Story 11.2: DB-backed atomic apply ────────────
   graph.addNode(
     new FnNode({
       id: 'apply',
-      fn: (ctx) => {
+      fn: async (ctx) => {
         const state = ctx.state as RestructureState;
         const clusters = state.finalClusters ?? state.proposedClusters ?? [];
 
@@ -399,12 +408,141 @@ export function createRestructureLayersGraph() {
           };
         }
 
-        const updatedGraph = applyClustersMutation(state.graph, clusters);
+        const { workspaceId, studioId, graph: originalGraph } = state;
 
-        return {
-          kind: 'end' as const,
-          statePatch: { updatedGraph },
-        };
+        try {
+          // ── Step 1: Snapshot current layers for checkpoint ─────────────────
+          const snapshot = await snapshotLayers(workspaceId);
+
+          // ── Step 2: Create pre-restructure checkpoint (before mutations) ───
+          let savedCheckpointId: string | undefined;
+          if (studioId) {
+            const cp = await checkpointPersistence.createCheckpoint(studioId, {
+              parentId: null,
+              branchName: 'main',
+              turnNumber: 0,
+              checkpoint: {},
+              graphState: snapshot as unknown as unknown[],
+              userMessage: 'pre-restructure',
+              mermaidPreview: null,
+            });
+            savedCheckpointId = cp.id;
+          }
+
+          // ── Step 3: Find or create the root LayerGraph for this workspace ──
+          // We need a parent LayerGraph to attach children to.
+          // Use the first root-level layer, or create one if none exists.
+          let parentLayer = await prisma.layerGraph.findFirst({
+            where: { workspaceId, parentGraphId: null, deletedAt: null },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          if (!parentLayer) {
+            parentLayer = await prisma.layerGraph.create({
+              data: {
+                workspaceId,
+                name: 'Root',
+                depth: 0,
+              },
+            });
+          }
+
+          const parentLayerId = parentLayer.id;
+          const parentDepth = parentLayer.depth;
+
+          // ── Step 4: Build mutated parent graph ─────────────────────────────
+          const updatedParentGraph = applyClustersMutation(originalGraph, clusters);
+
+          // ── Step 5: Atomic DB transaction ──────────────────────────────────
+          const appliedLayerIds: string[] = [];
+
+          await prisma.$transaction(async (tx) => {
+            for (const cluster of clusters) {
+              // Build child graph: nodes in this cluster + internal edges
+              const clusterNodeSet = new Set(cluster.nodeIds);
+              const childNodes = originalGraph.nodes.filter((n) => clusterNodeSet.has(n.id));
+              const childEdges = originalGraph.edges.filter(
+                (e) => clusterNodeSet.has(e.from) && clusterNodeSet.has(e.to)
+              );
+              const childGraph: JsonGraph = {
+                diagramType: originalGraph.diagramType,
+                nodes: childNodes,
+                edges: childEdges,
+              };
+
+              // Build ports from suggestedPorts
+              const ports: LayerPort[] = cluster.suggestedPorts.map(
+                (sp: SuggestedPort, idx: number) => ({
+                  id: `port-${cluster.id}-${idx}`,
+                  name: sp.name,
+                  direction: sp.direction,
+                  order: idx,
+                })
+              );
+
+              // Create child LayerGraph
+              const childLayer = await (tx as typeof prisma).layerGraph.create({
+                data: {
+                  workspaceId,
+                  name: cluster.name,
+                  parentGraphId: parentLayerId,
+                  parentNodeId: cluster.id,
+                  depth: parentDepth + 1,
+                  ports: ports as unknown as Prisma.InputJsonValue,
+                  graph: childGraph as unknown as Prisma.InputJsonValue,
+                },
+              });
+
+              appliedLayerIds.push(childLayer.id);
+            }
+
+            // Update parent LayerGraph with the mutated graph (composite nodes)
+            await (tx as typeof prisma).layerGraph.update({
+              where: { id: parentLayerId },
+              data: {
+                graph: updatedParentGraph as unknown as Prisma.InputJsonValue,
+                summary: null,
+              },
+            });
+          });
+
+          // ── Step 6: Post-transaction contract validation ───────────────────
+          const validationWarningsList: string[] = [];
+
+          for (const childLayerId of appliedLayerIds) {
+            const childRow = await prisma.layerGraph.findUnique({
+              where: { id: childLayerId },
+            });
+            if (!childRow) continue;
+
+            const childLayer = {
+              parentNodeId: childRow.parentNodeId,
+              ports: childRow.ports as unknown as LayerPort[],
+              graph: childRow.graph as object,
+            };
+
+            const warnings = validateContracts(childLayer, updatedParentGraph);
+            for (const w of warnings) {
+              validationWarningsList.push(`[${w.severity}] ${w.nodeId}: ${w.message}`);
+            }
+          }
+
+          return {
+            kind: 'end' as const,
+            statePatch: {
+              updatedGraph: updatedParentGraph,
+              checkpointId: savedCheckpointId,
+              appliedLayerIds,
+              ...(validationWarningsList.length > 0 ? { error: undefined } : {}),
+            },
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Apply failed';
+          return {
+            kind: 'end' as const,
+            statePatch: { error: message },
+          };
+        }
       },
     })
   );

@@ -493,13 +493,17 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         checkpointRef.current = null;
         setSessionId(null);
       } else if (event.type === 'restructure-progress') {
-        // Story 11.1: display restructure progress as a chat message
+        // Story 11.1 / 11.2: display restructure progress as a chat message
         const payload = event.data as RestructureProgressPayload;
         const stepEmoji: Record<string, string> = {
           analyzing: '🔍',
           proposing: '💡',
           negotiating: '🤝',
           applying: '⚙️',
+          'checkpoint-created': '💾',
+          'transaction-start': '⚙️',
+          'cluster-applied': '🧩',
+          'validation-done': '✔️',
           done: '✅',
         };
         const emoji = stepEmoji[payload.step] ?? '📊';
@@ -955,11 +959,29 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   }, []);
 
   // Checkpoint restore handler — updates all studio state from a past checkpoint
+  // Story 11.2: if the checkpoint is tagged "pre-restructure", also restore LayerGraphs
   const handleCheckpointRestore = useCallback(
     async (checkpointId: string) => {
       const sid = currentStudioId;
       if (!sid) return;
       setIsLoading(true);
+
+      // Check if this is a pre-restructure checkpoint (Story 11.2)
+      const cpNode = cpTree.tree.find((n) => n.id === checkpointId);
+      const isPreRestructure = cpNode?.userMessage === 'pre-restructure';
+
+      if (isPreRestructure) {
+        try {
+          await fetch(`/api/workspaces/${workspaceId}/layers/restore-snapshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ checkpointId }),
+          });
+        } catch {
+          // Best-effort — continue with studio restore even if layer restore fails
+        }
+      }
+
       const result = await cpTree.restore(workspaceId, sid, checkpointId);
       if (result) {
         // Restore checkpoint for graph resumption
@@ -995,7 +1017,11 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         // Clear interaction widget and animation state
         setInteractionPayload(undefined);
         setPatchAnimation(undefined);
-        toast.success(`Restored to turn ${result.turnNumber}`);
+        toast.success(
+          isPreRestructure
+            ? `Pre-restructure state restored (turn ${result.turnNumber})`
+            : `Restored to turn ${result.turnNumber}`
+        );
       } else {
         toast.error('Failed to restore checkpoint');
       }

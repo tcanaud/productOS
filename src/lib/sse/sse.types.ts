@@ -67,8 +67,17 @@ export interface SessionEndPayload {
   summary: string;
 }
 
-// Story 11.1 — Restructure progress event
-export type RestructureStep = 'analyzing' | 'proposing' | 'negotiating' | 'applying' | 'done';
+// Story 11.1 / 11.2 — Restructure progress event
+export type RestructureStep =
+  | 'analyzing'
+  | 'proposing'
+  | 'negotiating'
+  | 'applying'
+  | 'checkpoint-created'
+  | 'transaction-start'
+  | 'cluster-applied'
+  | 'validation-done'
+  | 'done';
 
 export interface RestructureProgressPayload {
   step: RestructureStep;
