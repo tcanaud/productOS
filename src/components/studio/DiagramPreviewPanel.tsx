@@ -41,6 +41,8 @@ export type DiagramPreviewPanelProps = {
   onSummaryMessage?: (summary: string) => void;
   /** Workspace ID — required for AI node actions. */
   workspaceId?: string;
+  /** Story 9.3 — Called when the user navigates into a composite node's child layer. */
+  onNavigateToLayer?: (childGraphId: string, nodeLabel: string) => void;
 };
 
 export function DiagramPreviewPanel({
@@ -54,6 +56,7 @@ export function DiagramPreviewPanel({
   onGraphUpdate,
   onSummaryMessage,
   workspaceId,
+  onNavigateToLayer,
 }: DiagramPreviewPanelProps) {
   const hasContent = Boolean(diagramContent);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,6 +64,8 @@ export function DiagramPreviewPanel({
   const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
   const [chatState, setChatState] = useState<ChatState>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  /** Story 9.3 — layer transition animation state */
+  const [isLayerTransitioning, setIsLayerTransitioning] = useState(false);
 
   const handleNodeClick = useCallback((nodeId: string, pos: ClickPosition) => {
     setContextMenu({ type: 'node', nodeId, position: pos });
@@ -73,8 +78,39 @@ export function DiagramPreviewPanel({
     []
   );
 
+  /** Story 9.3 — Animate a layer transition and then call onNavigateToLayer. */
+  const navigateToLayer = useCallback(
+    (childGraphId: string, nodeLabel: string) => {
+      setIsLayerTransitioning(true);
+      // Brief fade-out (200ms), then trigger navigation
+      setTimeout(() => {
+        onNavigateToLayer?.(childGraphId, nodeLabel);
+        setIsLayerTransitioning(false);
+      }, 200);
+    },
+    [onNavigateToLayer]
+  );
+
+  /** Story 9.3 — Double-click on composite node → navigate into child layer. */
+  const handleNodeDoubleClick = useCallback(
+    (nodeId: string) => {
+      const node = graph?.nodes.find((n) => n.id === nodeId);
+      if (node?.type === 'composite' && node.childGraphId) {
+        navigateToLayer(node.childGraphId, node.label ?? node.id);
+      }
+    },
+    [graph, navigateToLayer]
+  );
+
   const handleAction = useCallback(
     async (action: DiagramAction) => {
+      // Story 9.3 — handle zoom-into-layer
+      if (action.type === 'zoom-into-layer') {
+        const nodeLabel = graph?.nodes.find((n) => n.id === action.nodeId)?.label ?? action.nodeId;
+        navigateToLayer(action.childGraphId, nodeLabel);
+        return;
+      }
+
       // Delegate non-AI actions to the parent immediately
       if (
         action.type !== 'expand-node' &&
@@ -136,7 +172,8 @@ export function DiagramPreviewPanel({
         const newCount = data.graph.nodes.length;
         const oldCount = graph.nodes.length;
         const delta = newCount - oldCount;
-        const deltaText = delta > 0 ? `+${delta} node(s)` : delta < 0 ? `${delta} node(s)` : 'restructured';
+        const deltaText =
+          delta > 0 ? `+${delta} node(s)` : delta < 0 ? `${delta} node(s)` : 'restructured';
         onSummaryMessage?.(`${actionVerb} node "${nodeLabel}" (${deltaText}).`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Something went wrong';
@@ -147,7 +184,15 @@ export function DiagramPreviewPanel({
         setIsProcessing(false);
       }
     },
-    [onDiagramAction, onGraphUpdate, onSummaryMessage, graph, annotations, workspaceId]
+    [
+      onDiagramAction,
+      onGraphUpdate,
+      onSummaryMessage,
+      graph,
+      annotations,
+      workspaceId,
+      navigateToLayer,
+    ]
   );
 
   const closeMenu = useCallback(() => setContextMenu(null), []);
@@ -215,7 +260,7 @@ export function DiagramPreviewPanel({
         <div
           ref={containerRef}
           className="relative h-full w-full rounded-lg border border-border overflow-hidden transition-opacity duration-300"
-          style={{ opacity: 1 }}
+          style={{ opacity: isLayerTransitioning ? 0 : 1, transition: 'opacity 200ms ease-out' }}
         >
           <MermaidPreview
             content={diagramContent!}
@@ -224,6 +269,7 @@ export function DiagramPreviewPanel({
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             onBadgeClick={handleBadgeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
           />
 
           {/* Live review running indicator */}
@@ -262,6 +308,10 @@ export function DiagramPreviewPanel({
           onAction={handleAction}
           onClose={closeMenu}
           annotations={annotations}
+          childGraphId={
+            graph?.nodes.find((n) => n.id === contextMenu.nodeId && n.type === 'composite')
+              ?.childGraphId
+          }
         />
       )}
       {contextMenu?.type === 'edge' && (

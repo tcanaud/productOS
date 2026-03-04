@@ -25,7 +25,9 @@ export type DiagramAction =
   | { type: 'expand-node'; nodeId: string }
   | { type: 'ask-node'; nodeId: string }
   | { type: 'simplify-node'; nodeId: string }
-  | { type: 'view-review'; nodeId: string };
+  | { type: 'view-review'; nodeId: string }
+  // Story 9.3 — Layer navigation
+  | { type: 'zoom-into-layer'; nodeId: string; childGraphId: string };
 
 type NodeMenuProps = {
   type: 'node';
@@ -35,6 +37,8 @@ type NodeMenuProps = {
   onClose: () => void;
   /** Review annotations — used to show/hide the "View review details" item. */
   annotations?: Annotation[];
+  /** If set, the node is composite and this is its child layer ID (Story 9.3). */
+  childGraphId?: string;
 };
 
 type EdgeMenuProps = {
@@ -115,6 +119,22 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
       >
         {props.type === 'node' && (
           <div className="flex flex-col py-1">
+            {/* Story 9.3 — Layer navigation (composite nodes only) */}
+            {props.childGraphId && (
+              <>
+                <MenuItem
+                  label="Zoom into layer"
+                  onClick={() =>
+                    handleAction({
+                      type: 'zoom-into-layer',
+                      nodeId: props.nodeId,
+                      childGraphId: props.childGraphId!,
+                    })
+                  }
+                />
+                <MenuSeparator />
+              </>
+            )}
             {/* Story 7.4 — AI-powered actions */}
             <MenuItem
               label="Expand into sub-flow"

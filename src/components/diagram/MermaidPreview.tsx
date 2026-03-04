@@ -56,6 +56,8 @@ type Props = {
   onEdgeClick?: (edgeId: string, pos: ClickPosition, from: string, to: string) => void;
   /** Called when the user clicks a review badge. */
   onBadgeClick?: (nodeId: string, annotation: Annotation) => void;
+  /** Story 9.3 — Called when the user double-clicks a diagram node. */
+  onNodeDoubleClick?: (nodeId: string) => void;
 };
 
 let mermaidInitialized = false;
@@ -67,6 +69,7 @@ export function MermaidPreview({
   onNodeClick,
   onEdgeClick,
   onBadgeClick,
+  onNodeDoubleClick,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevGraphRef = useRef<JsonGraph | null>(null);
@@ -155,6 +158,13 @@ export function MermaidPreview({
               onNodeClick(nodeId, { x: e.clientX, y: e.clientY });
             });
           }
+          if (onNodeDoubleClick) {
+            nodeEl.addEventListener('dblclick', (e) => {
+              e.stopPropagation();
+              const nodeId = mapSvgNodeId(nodeEl.id) ?? nodeEl.id;
+              onNodeDoubleClick(nodeId);
+            });
+          }
         });
 
         // ── Attach edge handlers ──────────────────────────────────────────────
@@ -185,7 +195,7 @@ export function MermaidPreview({
     };
 
     void renderMermaid();
-  }, [content, graph, onNodeClick, onEdgeClick]);
+  }, [content, graph, onNodeClick, onEdgeClick, onNodeDoubleClick]);
 
   // ── Inject badges + heatmap when annotations or SVG change ─────────────────
   useEffect(() => {
