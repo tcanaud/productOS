@@ -1,7 +1,9 @@
 export interface LayerPort {
   id: string;
-  label: string;
-  direction: 'in' | 'out';
+  name: string;
+  direction: 'input' | 'output';
+  type?: string;
+  order: number;
 }
 
 export interface LayerGraphRecord {

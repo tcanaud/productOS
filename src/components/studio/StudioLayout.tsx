@@ -27,8 +27,10 @@ import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 import type { LiveReviewItem } from '@/lib/session/types';
 import { ReviewTaskPanel } from './ReviewTaskPanel';
 import { CheckpointTimeline } from './CheckpointTimeline';
+import { PortEditor } from './PortEditor';
 import { useCheckpointTree } from '@/hooks/useCheckpointTree';
 import type { StudioSessionState } from '@/lib/graphs/studio-session.types';
+import type { DiagramAction } from '@/components/diagram/DiagramContextMenu';
 
 export type PersonaBubble = {
   personaId: string;
@@ -104,6 +106,9 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
 
   // Story 9.4 — Layer minimap toggle
   const [minimapOpen, setMinimapOpen] = useState(false);
+
+  // Story 9.5 — Port editor state
+  const [portEditorLayerId, setPortEditorLayerId] = useState<string | null>(null);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -496,6 +501,14 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
     const chatMessage = `I'd like to discuss this review observation about node "${item.nodeId}":\n\n> ${item.message}${item.description ? `\n> ${item.description}` : ''}\n\n${item.suggestions?.length ? `Suggestions: \n- ${item.suggestions.join('\n- ')}` : ''}\n\nWhat do you suggest?`;
     setInputValue(chatMessage);
     inputRef.current?.focus();
+  }, []);
+
+  // Story 9.5 — Handle diagram actions from the context menu (non-AI branch)
+  const handleDiagramAction = useCallback((action: DiagramAction) => {
+    if (action.type === 'edit-ports') {
+      setPortEditorLayerId(action.layerId);
+    }
+    // Other non-AI actions can be handled here in future stories
   }, []);
 
   // Story 7.4: handle graph update from AI node actions (expand / simplify)
@@ -1010,6 +1023,7 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
               graph={currentGraphRef.current ?? undefined}
               annotations={annotations}
               isReviewRunning={isReviewRunning}
+              onDiagramAction={handleDiagramAction}
               onGraphUpdate={handleGraphUpdate}
               onSummaryMessage={handleSummaryMessage}
               workspaceId={workspaceId}
@@ -1029,6 +1043,16 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
           />
         </div>
       </div>
+
+      {/* Story 9.5 — Port Editor modal */}
+      {portEditorLayerId && (
+        <PortEditor
+          layerId={portEditorLayerId}
+          workspaceId={workspaceId}
+          graph={currentGraphRef.current ?? undefined}
+          onClose={() => setPortEditorLayerId(null)}
+        />
+      )}
     </div>
   );
 }

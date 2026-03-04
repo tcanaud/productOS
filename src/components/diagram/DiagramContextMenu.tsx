@@ -27,7 +27,9 @@ export type DiagramAction =
   | { type: 'simplify-node'; nodeId: string }
   | { type: 'view-review'; nodeId: string }
   // Story 9.3 — Layer navigation
-  | { type: 'zoom-into-layer'; nodeId: string; childGraphId: string };
+  | { type: 'zoom-into-layer'; nodeId: string; childGraphId: string }
+  // Story 9.5 — Port editor
+  | { type: 'edit-ports'; nodeId: string; layerId: string };
 
 type NodeMenuProps = {
   type: 'node';
@@ -119,7 +121,7 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
       >
         {props.type === 'node' && (
           <div className="flex flex-col py-1">
-            {/* Story 9.3 — Layer navigation (composite nodes only) */}
+            {/* Story 9.3 / 9.5 — Layer navigation + Port Editor (composite nodes only) */}
             {props.childGraphId && (
               <>
                 <MenuItem
@@ -129,6 +131,16 @@ export function DiagramContextMenu(props: DiagramContextMenuProps) {
                       type: 'zoom-into-layer',
                       nodeId: props.nodeId,
                       childGraphId: props.childGraphId!,
+                    })
+                  }
+                />
+                <MenuItem
+                  label="Edit Ports…"
+                  onClick={() =>
+                    handleAction({
+                      type: 'edit-ports',
+                      nodeId: props.nodeId,
+                      layerId: props.childGraphId!,
                     })
                   }
                 />
