@@ -3,11 +3,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
+import { Map, X } from 'lucide-react';
 import { ConversationPanel } from './ConversationPanel';
 import { DiagramPreviewPanel } from './DiagramPreviewPanel';
 import { InteractionWidget } from './InteractionWidget';
 import { SSEConnectionBadge } from './SSEConnectionBadge';
 import { LayerBreadcrumb } from './LayerBreadcrumb';
+import { LayerMinimap } from './LayerMinimap';
 import { useStudioStream } from '@/hooks/useStudioStream';
 import { useLayerNavigation } from '@/hooks/useLayerNavigation';
 import { applyPatch } from '@/lib/graphs/patch-applier';
@@ -99,6 +101,9 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
   // Checkpoint tree for undo/redo/branching
   const cpTree = useCheckpointTree();
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
+
+  // Story 9.4 — Layer minimap toggle
+  const [minimapOpen, setMinimapOpen] = useState(false);
 
   // Story 6.6: logical session ID for SSE routing (generated when a new session starts)
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -951,11 +956,29 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
         )}
       </div>
       <div className="flex flex-1 overflow-hidden">
+        {/* Story 9.4 — Layer minimap aside panel */}
+        {minimapOpen && (
+          <aside className="w-56 shrink-0 border-r border-border bg-background flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <span>Layers</span>
+              <button
+                type="button"
+                onClick={() => setMinimapOpen(false)}
+                className="hover:text-foreground transition-colors"
+                aria-label="Close layer minimap"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            <LayerMinimap workspaceId={workspaceId} />
+          </aside>
+        )}
+
         {/* Diagram panel */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {/* Story 9.3 — Layer breadcrumb + back button (shown when navigated into a layer) */}
-          {layerStack.length > 1 && (
-            <div className="flex items-center border-b border-border">
+          {/* Story 9.3/9.4 — Layer breadcrumb + back button + minimap toggle */}
+          <div className="flex items-center border-b border-border">
+            {layerStack.length > 1 && (
               <button
                 type="button"
                 onClick={() => void handlePopLayer()}
@@ -964,9 +987,21 @@ export function StudioLayout({ workspaceId, studioId }: StudioLayoutProps) {
               >
                 ← Back
               </button>
-              <LayerBreadcrumb />
-            </div>
-          )}
+            )}
+            <div className="flex-1">{layerStack.length > 1 && <LayerBreadcrumb />}</div>
+            <button
+              type="button"
+              onClick={() => setMinimapOpen((v) => !v)}
+              className={[
+                'p-2 rounded hover:bg-muted transition-colors flex-shrink-0 mr-1',
+                minimapOpen ? 'bg-muted text-primary' : 'text-muted-foreground',
+              ].join(' ')}
+              title="Toggle layer minimap"
+              aria-label="Toggle layer minimap"
+            >
+              <Map className="h-4 w-4" />
+            </button>
+          </div>
           <div className="flex-1 overflow-hidden">
             <DiagramPreviewPanel
               diagramContent={diagramContent}
