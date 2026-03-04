@@ -23,6 +23,8 @@ export interface GraphNode {
   id: string;
   label: string;
   shape?: NodeShape;
+  type?: 'composite' | string;
+  childGraphId?: string;
 }
 
 export interface GraphEdge {

@@ -10,7 +10,7 @@ import {
   animateAddedEdges,
   animateInitialRender,
 } from '@/lib/svg/patch-animator';
-import { injectBadges } from '@/lib/svg/badge-renderer';
+import { injectBadges, injectLayerBadges } from '@/lib/svg/badge-renderer';
 import type { JsonGraph } from '@/lib/json2mermaid/types';
 import type { Annotation } from '@/lib/ai/graphs/live-review.graph';
 
@@ -30,6 +30,17 @@ const HOVER_STYLE = `
   .edgePath.diagram-edge-hover path {
     stroke: #6366f1;
     stroke-width: 2.5;
+  }
+  .node.composite > rect,
+  .node.composite > polygon,
+  .node.composite > circle {
+    cursor: pointer;
+  }
+  .node.composite:hover > rect,
+  .node.composite:hover > polygon,
+  .node.composite:hover > circle {
+    filter: drop-shadow(0 0 6px rgba(79, 70, 229, 0.6));
+    cursor: pointer;
   }
 `;
 
@@ -174,7 +185,6 @@ export function MermaidPreview({
     };
 
     void renderMermaid();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, graph, onNodeClick, onEdgeClick]);
 
   // ── Inject badges + heatmap when annotations or SVG change ─────────────────
@@ -185,6 +195,12 @@ export function MermaidPreview({
 
     injectBadges(svgEl, annotations ?? []);
 
+    // Inject layer badges for composite nodes
+    const compositeIds = (graph?.nodes ?? [])
+      .filter((n) => n.type === 'composite')
+      .map((n) => n.id);
+    injectLayerBadges(svgEl, compositeIds);
+
     // Wire badge click → onBadgeClick (cleanup removes previous listener)
     const handler = ((e: Event) => {
       const ce = e as CustomEvent<{ nodeId: string; annotation: Annotation }>;
@@ -192,7 +208,7 @@ export function MermaidPreview({
     }) as EventListener;
     svgEl.addEventListener('review-badge-click', handler);
     return () => svgEl.removeEventListener('review-badge-click', handler);
-  }, [annotations, onBadgeClick, renderGeneration]);
+  }, [annotations, graph, onBadgeClick, renderGeneration]);
 
   return (
     <div className="relative h-full w-full overflow-auto bg-white p-4">

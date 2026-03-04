@@ -32,6 +32,9 @@ const HEATMAP_OPACITY = 0.18;
 const BADGE_CLASS = 'review-badge';
 const HEATMAP_CLASS = 'review-heatmap';
 const BADGE_RADIUS = 7;
+const LAYER_BADGE_CLASS = 'layer-badge';
+const LAYER_BADGE_SIZE = 14;
+const LAYER_BADGE_COLOR = '#4f46e5';
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -185,6 +188,78 @@ export function injectBadges(svgRoot: SVGSVGElement, annotations: Annotation[]):
     });
 
     // Append badge INSIDE the node <g> — inherits all transforms automatically
+    nodeEl.appendChild(badgeGroup);
+  });
+}
+
+/**
+ * Inject layer indicator badges onto composite diagram nodes.
+ * Idempotent: removes existing layer badges before re-injecting.
+ *
+ * The badge is a small stacked-layers icon placed at the top-left corner
+ * of each composite node's bounding box.
+ *
+ * @param svgRoot - The root SVG element of the Mermaid diagram.
+ * @param compositeNodeIds - Array of JsonGraph node IDs that are composite.
+ */
+export function injectLayerBadges(svgRoot: SVGSVGElement, compositeNodeIds: string[]): void {
+  // Remove any previously injected layer badges (idempotent)
+  svgRoot.querySelectorAll<SVGElement>(`.${LAYER_BADGE_CLASS}`).forEach((el) => el.remove());
+
+  if (!compositeNodeIds.length) return;
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const compositeSet = new Set(compositeNodeIds);
+
+  const nodeEls = svgRoot.querySelectorAll<SVGGElement>('g.node');
+
+  nodeEls.forEach((nodeEl) => {
+    const nodeId = mapSvgNodeId(nodeEl.id) ?? nodeEl.id;
+    if (!compositeSet.has(nodeId)) return;
+
+    const bbox = getShapeBBox(nodeEl);
+    if (!bbox) return;
+
+    // Position badge at the top-left of the node bbox
+    const bx = bbox.x + 2;
+    const by = bbox.y + 2;
+
+    const badgeGroup = document.createElementNS(ns, 'g') as SVGGElement;
+    badgeGroup.setAttribute('class', LAYER_BADGE_CLASS);
+    badgeGroup.setAttribute('data-node-id', nodeId);
+    badgeGroup.setAttribute('pointer-events', 'none');
+
+    // Background circle
+    const circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', String(bx + LAYER_BADGE_SIZE / 2));
+    circle.setAttribute('cy', String(by + LAYER_BADGE_SIZE / 2));
+    circle.setAttribute('r', String(LAYER_BADGE_SIZE / 2));
+    circle.style.setProperty('fill', LAYER_BADGE_COLOR, 'important');
+    circle.setAttribute('stroke', '#ffffff');
+    circle.setAttribute('stroke-width', '1');
+
+    // Stacked-layers icon as SVG path (scaled to badge size)
+    // Two overlapping rect outlines representing layers
+    const scale = LAYER_BADGE_SIZE / 20;
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute(
+      'd',
+      `M${bx + 3 * scale} ${by + 5 * scale} h${14 * scale} v${10 * scale} h-${14 * scale}Z ` +
+        `M${bx + 3 * scale} ${by + 5 * scale} h${14 * scale} M${bx + 3 * scale} ${by + 9 * scale} h${14 * scale}`
+    );
+    path.style.setProperty('fill', 'none', 'important');
+    path.style.setProperty('stroke', '#ffffff', 'important');
+    path.style.setProperty('stroke-width', '1.5', 'important');
+    path.setAttribute('stroke-linecap', 'round');
+
+    // Tooltip
+    const title = document.createElementNS(ns, 'title');
+    title.textContent = 'Composite node — contains child layer';
+
+    badgeGroup.appendChild(title);
+    badgeGroup.appendChild(circle);
+    badgeGroup.appendChild(path);
+
     nodeEl.appendChild(badgeGroup);
   });
 }

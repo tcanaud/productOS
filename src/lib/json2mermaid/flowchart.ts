@@ -46,7 +46,8 @@ function renderNode(node: GraphNode): string {
   const open = SHAPE_OPEN[shape] ?? '[';
   const close = SHAPE_CLOSE[shape] ?? ']';
   const label = sanitizeLabel(node.label);
-  return `  ${safeId}${open}"${label}"${close}`;
+  const classStr = node.type === 'composite' ? ':::composite' : '';
+  return `  ${safeId}${open}"${label}"${close}${classStr}`;
 }
 
 function renderEdge(edge: GraphEdge): string {
@@ -89,12 +90,21 @@ export function flowchartToMermaid(graph: JsonGraph): string {
   const direction: FlowchartDirection = graph.direction ?? 'TD';
   const lines: string[] = [`flowchart ${direction}`];
 
+  let hasComposite = false;
+
   for (const node of graph.nodes) {
     lines.push(renderNode(node));
+    if (node.type === 'composite') hasComposite = true;
   }
 
   for (const edge of graph.edges) {
     lines.push(renderEdge(edge));
+  }
+
+  if (hasComposite) {
+    lines.push(
+      '  classDef composite fill:#f0f4ff,stroke:#4f46e5,stroke-width:3px,stroke-dasharray:5 5'
+    );
   }
 
   return lines.join('\n');
